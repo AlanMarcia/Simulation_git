@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <map>
 #include <algorithm> // For std::upper_bound, std::stod
+#include <filesystem> // For creating directories
 
 // Physical Constants
 const double ELEMENTARY_CHARGE = 1.602176634e-19; // C
@@ -323,13 +324,16 @@ int main() {
     double max_sim_time_s = 1.0e-8; // Maximum simulation time (e.g., 10 nanoseconds)
     // --- End Simulation Parameters ---
 
+    // Create output folder
+    const std::string output_folder = "geometria_piana";
+   // std::filesystem::create_directory(output_folder);
 
     // Load data
-    std::vector<double> x_coords_um = load_1d_csv_cpp("x_coordinates.csv");
-    std::vector<double> y_coords_um = load_1d_csv_cpp("y_coordinates.csv");
-    std::vector<std::vector<double>> Ex_V_um = load_2d_csv_cpp("electric_field_x.csv"); // Ex[ix][iy]
-    std::vector<std::vector<double>> Ey_V_um = load_2d_csv_cpp("electric_field_y.csv"); // Ey[ix][iy]
-    std::map<std::string, double> geo_params = load_geometry_params_cpp("geometry_params.csv");
+    std::vector<double> x_coords_um = load_1d_csv_cpp(output_folder + "/x_coordinates.csv");
+    std::vector<double> y_coords_um = load_1d_csv_cpp(output_folder + "/y_coordinates.csv");
+    std::vector<std::vector<double>> Ex_V_um = load_2d_csv_cpp(output_folder + "/electric_field_x.csv"); // Ex[ix][iy]
+    std::vector<std::vector<double>> Ey_V_um = load_2d_csv_cpp(output_folder + "/electric_field_y.csv"); // Ey[ix][iy]
+    std::map<std::string, double> geo_params = load_geometry_params_cpp(output_folder + "/geometry_params.csv");
 
     if (x_coords_um.empty() || y_coords_um.empty() || Ex_V_um.empty() || Ey_V_um.empty() || geo_params.empty()) {
         std::cerr << "Failed to load one or more data files. Aborting." << std::endl;
@@ -420,7 +424,9 @@ int main() {
     std::cout << "Simulation finished after " << step_count << " steps." << std::endl;
 
     // Save trajectory
-    std::string output_filename = (particle_choice == ParticleType::PROTON) ? "trajectory_proton.csv" : "trajectory_alpha.csv";
+    std::string output_filename = (particle_choice == ParticleType::PROTON) 
+                                  ? output_folder + "/trajectory_proton.csv" 
+                                  : output_folder + "/trajectory_alpha.csv";
     save_trajectory(particle, output_filename);
 
     return 0;
