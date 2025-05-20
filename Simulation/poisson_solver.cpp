@@ -6,6 +6,7 @@
 #include <string>
 #include <algorithm> // For std::min, std::max
 #include <omp.h>     // For OpenMP
+#include <filesystem> // For creating directories
 
 // Helper function to save a 2D vector to a CSV file
 void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
@@ -87,8 +88,12 @@ int main() {
     const double V_left = 0.0;  // Volts
     const double V_right = -1000.0; // Volts
 
+    // Create output folder
+    const std::string output_folder = "geometria_piana";
+    std::filesystem::create_directory(output_folder);
+
     // Save geometry parameters before extensive calculations
-    saveGeometryParamsToCSV("geometry_params.csv", 
+    saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
                             h, 
                             x_free_space, x_structure_len, 
                             y_si_layer_thick, y_vacuum_gap_thick, 
@@ -284,12 +289,12 @@ int main() {
     }
 
     // --- Output Results to CSV ---
-    saveToCSV(V, "potential.csv");
-    saveToCSV(Ex, "electric_field_x.csv");
-    saveToCSV(Ey, "electric_field_y.csv");
-    saveToCSV(eps_r, "permittivity.csv"); // Save permittivity map for verification/plotting
-    saveCoordinatesToCSV(x_coords, "x_coordinates.csv");
-    saveCoordinatesToCSV(y_coords, "y_coordinates.csv");
+    saveToCSV(V, output_folder + "/potential.csv");
+    saveToCSV(Ex, output_folder + "/electric_field_x.csv");
+    saveToCSV(Ey, output_folder + "/electric_field_y.csv");
+    saveToCSV(eps_r, output_folder + "/permittivity.csv"); // Save permittivity map for verification/plotting
+    saveCoordinatesToCSV(x_coords, output_folder + "/x_coordinates.csv");
+    saveCoordinatesToCSV(y_coords, output_folder + "/y_coordinates.csv");
 
     std::cout << "\n--- Results Summary ---" << std::endl;
     std::cout << "Potential V, Electric fields Ex, Ey, Permittivity eps_r, and coordinates saved to CSV files." << std::endl;
