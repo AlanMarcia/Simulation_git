@@ -32,7 +32,7 @@ def load_geometry_params(filename):
         print(f"Error: Missing one or more required keys in {filename}. Required: {required_keys}")
         return None
     return params
-
+# Load geometry parameters
 def plot_results():
     # File paths
     potential_file = "potential.csv"
