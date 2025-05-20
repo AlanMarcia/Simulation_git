@@ -32,16 +32,20 @@ def load_geometry_params(filename):
         print(f"Error: Missing one or more required keys in {filename}. Required: {required_keys}")
         return None
     return params
-# Load geometry parameters
+
 def plot_results():
+    # Create output folder
+    output_folder = "geometria_piana"
+    os.makedirs(output_folder, exist_ok=True)
+
     # File paths
-    potential_file = "potential.csv"
-    ex_file = "electric_field_x.csv"
-    ey_file = "electric_field_y.csv"
-    eps_r_file = "permittivity.csv"
-    x_coords_file = "x_coordinates.csv"
-    y_coords_file = "y_coordinates.csv"
-    geometry_params_file = "geometry_params.csv"
+    potential_file = os.path.join(output_folder, "potential.csv")
+    ex_file = os.path.join(output_folder, "electric_field_x.csv")
+    ey_file = os.path.join(output_folder, "electric_field_y.csv")
+    eps_r_file = os.path.join(output_folder, "permittivity.csv")
+    x_coords_file = os.path.join(output_folder, "x_coordinates.csv")
+    y_coords_file = os.path.join(output_folder, "y_coordinates.csv")
+    geometry_params_file = os.path.join(output_folder, "geometry_params.csv")
 
     # Load geometry parameters
     geo_params = load_geometry_params(geometry_params_file)
@@ -96,7 +100,7 @@ def plot_results():
     ax_V.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_V.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig("potential_plot.png")
+    plt.savefig(os.path.join(output_folder, "potential_plot.png"))
 
     # Plot 2: Electric Field Magnitude
     plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
@@ -115,7 +119,7 @@ def plot_results():
     ax_Emag.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_Emag.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig("efield_magnitude_plot.png")
+    plt.savefig(os.path.join(output_folder, "efield_magnitude_plot.png"))
 
     # Plot 3: Permittivity Map
     plt.figure(figsize=(8, 6)) # New figure for Permittivity
@@ -134,10 +138,10 @@ def plot_results():
     ax_eps.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_eps.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig("permittivity_map_plot.png")
+    plt.savefig(os.path.join(output_folder, "permittivity_map_plot.png"))
 
     plt.show() # Show all figures
 
 if __name__ == '__main__':
     plot_results()
-    print("Plotting finished. Plots saved to potential_plot.png, efield_magnitude_plot.png, and permittivity_map_plot.png")
+    print("Plotting finished. Plots saved to geometria_piana folder.")
