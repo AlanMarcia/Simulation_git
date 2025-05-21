@@ -46,17 +46,14 @@ struct GeometryParameters {
     double h;         // Grid spacing in meters (SI)
     double x_fs;      // x_free_space in meters (SI)
     double x_sl;      // x_structure_len in meters (SI)
-    // double y_slt;  // Replaced by base and teeth heights
     double y_vgt;     // y_vacuum_gap_thick in meters (SI)
     double H_tot_geom; // H_total (from geometry file) in meters (SI)
 
-    // New parameters for toothed geometry
+    // Parameters for initial proton distribution
     double y_si_base_height; // y_si_base_height in meters (SI)
-    double y_teeth_height;   // y_teeth_height in meters (SI)
-    // double x_teeth_width;    // x_teeth_width in meters (SI) - Replaced
-    double initial_x_teeth_width; // Width of the rightmost tooth in meters (SI)
-    double x_teeth_width_increment; // Increment of tooth width from right to left in meters (SI)
-    double x_teeth_spacing;  // x_teeth_spacing in meters (SI)
+    double initial_y_teeth_height; // initial_y_teeth_height in meters (SI)
+    // Removed: initial_x_teeth_width, x_teeth_width_increment, x_teeth_spacing, y_teeth_height (if initial_y_teeth_height is used)
+    // Other detailed varying geometry parameters are not needed here if using eps_r map for collision.
 };
 
 // --- Helper Functions ---
@@ -150,16 +147,56 @@ bool load_field_csv(const std::string& filename, std::vector<std::vector<double>
     return true;
 }
 
+bool load_permittivity_map(const std::string& filename, std::vector<std::vector<double>>& eps_r_map, int Nx, int Ny) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open permittivity map file " << filename << std::endl;
+        return false;
+    }
+    eps_r_map.assign(Nx, std::vector<double>(Ny));
+    std::string line;
+    int y_idx = 0;
+    while (std::getline(file, line) && y_idx < Ny) {
+        std::stringstream ss(line);
+        std::string cell;
+        int x_idx = 0;
+        while (std::getline(ss, cell, ',') && x_idx < Nx) {
+            try {
+                eps_r_map[x_idx][y_idx] = std::stod(cell); // Permittivity values are unitless
+            } catch (const std::invalid_argument& ia) {
+                std::cerr << "Invalid argument in permittivity map: " << ia.what() << " in file " << filename << " at (" << x_idx << "," << y_idx << ")" << " value: " << cell << std::endl;
+                file.close();
+                return false;
+            } catch (const std::out_of_range& oor) {
+                 std::cerr << "Out of range in permittivity map: " << oor.what() << " in file " << filename << " at (" << x_idx << "," << y_idx << ")" << " value: " << cell << std::endl;
+                file.close();
+                return false;
+            }
+            x_idx++;
+        }
+        if (x_idx != Nx) {
+            // std::cerr << "Warning: Row " << y_idx << " in permittivity map " << filename << " has " << x_idx << " columns, expected " << Nx << std::endl;
+        }
+        y_idx++;
+    }
+    if (y_idx != Ny) {
+        // std::cerr << "Warning: Permittivity map file " << filename << " has " << y_idx << " rows, expected " << Ny << std::endl;
+    }
+    file.close();
+    std::cout << "Permittivity map loaded successfully from " << filename << std::endl;
+    return true;
+}
+
+
 bool load_geometry_params(const std::string& filename, GeometryParameters& geom) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open file " << filename << std::endl;
+        std::cerr << "Error: Could not open geometry parameters file " << filename << std::endl;
         return false;
     }
     std::string line;
-    // Initialize x_teeth_width_increment to 0.0 in case it's not in the CSV
-    geom.x_teeth_width_increment = 0.0; 
-    geom.initial_x_teeth_width = 0.0; // Initialize in case not present
+    // Initialize potentially optional parameters
+    geom.initial_y_teeth_height = 0.0; 
 
     while (std::getline(file, line)) {
         std::stringstream ss(line);
@@ -168,9 +205,9 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         std::getline(ss, value_str, ',');
         double value_um = 0.0;
         try {
-            value_um = std::stod(value_str); // Value from CSV is in µm
+            value_um = std::stod(value_str); 
         } catch (const std::exception& e) {
-            std::cerr << "Error parsing value for key '" << key << "': " << value_str << " (" << e.what() << ")" << std::endl;
+            std::cerr << "Error parsing value for key '" << key << "' in geometry_params: " << value_str << " (" << e.what() << ")" << std::endl;
             continue;
         }
         double value_m = value_um * 1.0e-6;     // Convert to meters
@@ -178,27 +215,28 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         if (key == "h") geom.h = value_m;
         else if (key == "x_free_space") geom.x_fs = value_m;
         else if (key == "x_structure_len") geom.x_sl = value_m;
-        // else if (key == "y_si_layer_thick") geom.y_slt = value_m; // Old parameter
         else if (key == "y_vacuum_gap_thick") geom.y_vgt = value_m;
         else if (key == "H_total") geom.H_tot_geom = value_m;
         else if (key == "y_si_base_height") geom.y_si_base_height = value_m;
-        else if (key == "y_teeth_height") geom.y_teeth_height = value_m;
-        // else if (key == "x_teeth_width") geom.x_teeth_width = value_m; // Old parameter
-        else if (key == "x_teeth_width") geom.initial_x_teeth_width = value_m; // Now initial width
-        else if (key == "x_teeth_width_increment") geom.x_teeth_width_increment = value_m; // New parameter
-        else if (key == "x_teeth_spacing") geom.x_teeth_spacing = value_m;
+        else if (key == "initial_y_teeth_height") geom.initial_y_teeth_height = value_m;
+        else if (key == "y_teeth_height" && geom.initial_y_teeth_height == 0.0) { 
+            // Fallback if initial_y_teeth_height is not present but y_teeth_height is
+            geom.initial_y_teeth_height = value_m;
+        }
+        // Other detailed geometry parameters are ignored as they are not needed for collision with eps_r map
     }
     file.close();
-    // Basic validation of loaded parameters
-    if (geom.h <= 0 || geom.x_sl <= 0 || geom.y_vgt <= 0 || geom.H_tot_geom <= 0 ||
-        geom.y_si_base_height < 0 || geom.y_teeth_height < 0 || 
-        geom.initial_x_teeth_width < 0 || geom.x_teeth_spacing < 0) { // Use initial_x_teeth_width
-        std::cerr << "Warning: Some critical geometry parameters are zero, negative or not loaded." << std::endl;
-        // Could return false here if strict validation is needed
+    // Basic validation
+    if (geom.h <= 0 || geom.y_vgt <= 0 || geom.H_tot_geom <= 0 || geom.y_si_base_height < 0) {
+        std::cerr << "Warning: Some critical geometry parameters (h, y_vgt, H_tot_geom, y_si_base_height) are zero, negative or not loaded." << std::endl;
     }
-    if (geom.initial_x_teeth_width > 0 && geom.x_teeth_spacing < 0) { // Spacing can be 0 for continuous teeth. Use initial_x_teeth_width
-         std::cerr << "Warning: initial_x_teeth_width is positive but x_teeth_spacing is negative." << std::endl;
+    if (geom.initial_y_teeth_height < 0) {
+         std::cerr << "Warning: initial_y_teeth_height is negative." << std::endl;
     }
+    std::cout << "Geometry parameters loaded. h (m): " << geom.h 
+              << ", y_si_base_height (m): " << geom.y_si_base_height 
+              << ", initial_y_teeth_height (m): " << geom.initial_y_teeth_height 
+              << ", y_vgt (m): " << geom.y_vgt << std::endl;
     return true;
 }
 
@@ -254,89 +292,47 @@ std::pair<double, double> get_acceleration(
 }
 
 bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
-                                      const GeometryParameters& geom, // geom parameters in meters
-                                      double L_total_sim, double H_total_sim) { // L_total_sim, H_total_sim in meters
-    if (px < 0.0 || px > L_total_sim || py < 0.0 || py > H_total_sim) {
+                                      const std::vector<double>& x_coords_m, // in meters
+                                      const std::vector<double>& y_coords_m, // in meters
+                                      const std::vector<std::vector<double>>& eps_r_map,
+                                      double h_grid_m, // grid spacing in meters
+                                      double L_total_sim_m, double H_total_sim_m) {
+    if (px < 0.0 || px >= L_total_sim_m || py < 0.0 || py >= H_total_sim_m) {
         return true; // Out of simulation box
     }
 
-    double x_struct_start = geom.x_fs;
-    double x_struct_end = geom.x_fs + geom.x_sl;
+    int i_idx = static_cast<int>(std::floor(px / h_grid_m));
+    int j_idx = static_cast<int>(std::floor(py / h_grid_m));
 
-    if (px >= x_struct_start && px <= x_struct_end) {
-        // Bottom Silicon Layer
-        double y_bot_si_base_top = geom.y_si_base_height;
-        double y_bot_si_teeth_top = geom.y_si_base_height + geom.y_teeth_height;
+    // Ensure indices are within the bounds of the eps_r_map
+    // The map dimensions are Nx and Ny from the loaded coordinates
+    int Nx_map = eps_r_map.size();
+    if (Nx_map == 0) return true; // Should not happen if loaded correctly
+    int Ny_map = eps_r_map[0].size();
+    if (Ny_map == 0) return true; // Should not happen
 
-        // Check bottom base
-        if (py >= 0.0 && py <= y_bot_si_base_top) return true;
+    i_idx = std::max(0, std::min(i_idx, Nx_map - 1));
+    j_idx = std::max(0, std::min(j_idx, Ny_map - 1));
 
-        // Check bottom teeth
-        if (geom.y_teeth_height > 0) { // Check only for teeth height
-            if (py > y_bot_si_base_top && py <= y_bot_si_teeth_top) {
-                double x_coord_in_structure = px - x_struct_start;
-                double current_tooth_right_edge_rel = geom.x_sl;
-                double current_tooth_w = geom.initial_x_teeth_width;
+    double permittivity_at_point = eps_r_map[i_idx][j_idx];
 
-                while (current_tooth_right_edge_rel > 0) {
-                    double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
-                    if (tooth_left_edge_rel < 0) tooth_left_edge_rel = 0;
+    // Define a threshold to distinguish silicon from vacuum
+    const double EPS_SI_SIM = 11.7; // Typical relative permittivity of Silicon
+    const double EPS_VAC_SIM = 1.0;  // Relative permittivity of Vacuum
+    const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0;
 
-                    if (x_coord_in_structure >= tooth_left_edge_rel && x_coord_in_structure < current_tooth_right_edge_rel) {
-                        return true; // Inside a bottom tooth
-                    }
-
-                    current_tooth_right_edge_rel = tooth_left_edge_rel - geom.x_teeth_spacing;
-                    if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <= 0) break;
-                    
-                    current_tooth_w += geom.x_teeth_width_increment;
-                    if (current_tooth_w <= 0 && geom.x_teeth_width_increment < 0) break;
-                    if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) break;
-                }
-            }
-        }
-
-
-        // Top Silicon Layer
-        double y_top_si_teeth_bottom = y_bot_si_teeth_top + geom.y_vgt;
-        double y_top_si_base_bottom = y_top_si_teeth_bottom + geom.y_teeth_height;
-
-        // Check top base
-        if (py >= y_top_si_base_bottom && py <= H_total_sim) return true;
-        
-        // Check top teeth
-        if (geom.y_teeth_height > 0) { // Check only for teeth height
-            if (py >= y_top_si_teeth_bottom && py < y_top_si_base_bottom) {
-                 double x_coord_in_structure = px - x_struct_start;
-                 double current_tooth_right_edge_rel = geom.x_sl;
-                 double current_tooth_w = geom.initial_x_teeth_width;
-
-                 while (current_tooth_right_edge_rel > 0) {
-                    double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
-                    if (tooth_left_edge_rel < 0) tooth_left_edge_rel = 0;
-
-                    if (x_coord_in_structure >= tooth_left_edge_rel && x_coord_in_structure < current_tooth_right_edge_rel) {
-                        return true; // Inside a top tooth
-                    }
-                    
-                    current_tooth_right_edge_rel = tooth_left_edge_rel - geom.x_teeth_spacing;
-                    if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <= 0) break;
-
-                    current_tooth_w += geom.x_teeth_width_increment;
-                    if (current_tooth_w <= 0 && geom.x_teeth_width_increment < 0) break;
-                    if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) break;
-                 }
-            }
-        }
+    if (permittivity_at_point >= material_threshold) {
+        return true; // Proton is in a material region
     }
-    return false; // In vacuum or free space outside structure
+
+    return false; // Proton is in vacuum or free space within bounds
 }
 
 
 int main() {
     std::cout << std::fixed << std::setprecision(6);
 
-    const std::string input_base_folder = "geometria_Denti_sfasati";
+    const std::string input_base_folder = "geometria_Denti_sfasati_profondi";
     const std::string output_traj_folder = input_base_folder + "/proton_trajectories";
     create_directory_if_not_exists(output_traj_folder);
 
@@ -376,9 +372,12 @@ int main() {
 
 
     std::vector<std::vector<double>> Ex_field, Ey_field; // Will be loaded in V/m
+    std::vector<std::vector<double>> eps_r_map_data;     // For collision detection
+
     if (!load_field_csv(input_base_folder + "/electric_field_x.csv", Ex_field, Nx, Ny) ||
-        !load_field_csv(input_base_folder + "/electric_field_y.csv", Ey_field, Nx, Ny)) {
-        std::cerr << "Failed to load electric field data. Exiting." << std::endl;
+        !load_field_csv(input_base_folder + "/electric_field_y.csv", Ey_field, Nx, Ny) ||
+        !load_permittivity_map(input_base_folder + "/permittivity.csv", eps_r_map_data, Nx, Ny)) {
+        std::cerr << "Failed to load electric field or permittivity data. Exiting." << std::endl;
         return 1;
     }
     std::cout << "Data loaded successfully. Nx=" << Nx << ", Ny=" << Ny << std::endl;
@@ -386,13 +385,13 @@ int main() {
     std::vector<Proton> protons(NUM_PROTONS);
     std::mt19937 rng(std::random_device{}());
     // Ensure y-distribution is within the vacuum gap correctly defined by new geometry (all in meters)
-    double vacuum_gap_start_y = geom.y_si_base_height + geom.y_teeth_height;
+    double vacuum_gap_start_y = geom.y_si_base_height + geom.initial_y_teeth_height; // Use initial_y_teeth_height
     double vacuum_gap_end_y = vacuum_gap_start_y + geom.y_vgt;
 
     if (vacuum_gap_start_y >= vacuum_gap_end_y) {
         std::cerr << "Error: Vacuum gap has zero or negative thickness based on new geometry parameters." << std::endl;
         std::cerr << "y_si_base_height (m): " << geom.y_si_base_height 
-                  << ", y_teeth_height (m): " << geom.y_teeth_height 
+                  << ", initial_y_teeth_height (m): " << geom.initial_y_teeth_height // Changed y_teeth_height to initial_y_teeth_height
                   << ", y_vgt (m): " << geom.y_vgt << std::endl;
         std::cerr << "Calculated vacuum_gap_start_y (m): " << vacuum_gap_start_y 
                   << ", vacuum_gap_end_y (m): " << vacuum_gap_end_y << std::endl;
@@ -500,16 +499,17 @@ int main() {
             if (p.x >= L_total_sim) { // L_total_sim is in meters
                 protons_reached_end_successfully++;
                 p.active = false;
-                if (p.trajectory_file.is_open()) { 
+                active_protons_count--;
+                if (p.trajectory_file.is_open()) {
+                    // Write final position before closing if it hit material/boundary
                     p.trajectory_file << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
                     p.trajectory_file.close();
                 }
-                active_protons_count--;
                 continue; 
             }
 
             // Check if proton hit material or went out of other bounds (all checks in meters)
-            if (is_in_material_or_out_of_bounds(p.x, p.y, geom, L_total_sim, H_total_sim)) {
+            if (is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, geom.h, L_total_sim, H_total_sim)) {
                 p.active = false;
                 if (p.trajectory_file.is_open()) {
                     p.trajectory_file.close();

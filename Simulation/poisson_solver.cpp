@@ -20,50 +20,63 @@
     #define STAT_FUNC stat
 #endif
 
-// Helper function to determine if a point is inside a tooth with varying width
-// Teeth get wider from right to left
-bool is_in_varying_tooth(double x_target_rel, // x-coordinate relative to the start of the structure
-                         double total_struct_len,
-                         double rightmost_tooth_width,
-                         double width_increment, // e.g., 2.0um for teeth getting wider to the left
-                         double space_between_teeth) {
-    double current_tooth_right_edge_rel = total_struct_len; // Tracks the right edge of the current tooth being considered, relative to structure start
-    double current_tooth_w = rightmost_tooth_width;
+// Helper struct to return info about a point in the structure
+struct PointMaterialInfo {
+    bool is_silicon_tooth_region; // True if x_target_rel falls into a tooth's x-span
+    double current_dig_depth_at_x; // Dig depth if x_target_rel is in a space's x-span
+    double current_tooth_height_at_x; // Height of the tooth if in a tooth region
+};
 
-    while (current_tooth_right_edge_rel > 0) {
-        double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
-        
-        // Ensure the tooth does not extend beyond the left boundary of the structure
-        if (tooth_left_edge_rel < 0) {
-            tooth_left_edge_rel = 0;
-        }
+// Helper function to determine material characteristics based on x-position
+PointMaterialInfo get_point_x_info(double x_target_rel, double total_struct_len,
+                                   double tooth_w,
+                                   double initial_space_w, double space_w_increment,
+                                   double initial_dig_d, double dig_d_increment,
+                                   double si_base_h,
+                                   double initial_tooth_h, double tooth_h_decrement) {
+    PointMaterialInfo info = {false, 0.0, 0.0}; // Default: not a tooth, no digging, no tooth height
+    double current_x_pos = 0.0;
+    double current_space_w = initial_space_w;
+    double current_dig_d = initial_dig_d;
+    double current_tooth_h = initial_tooth_h;
+    bool segment_is_tooth = true; // Assume structure starts with a tooth at its left edge
 
-        // Check if x_target_rel is within [tooth_left_edge_rel, current_tooth_right_edge_rel)
-        if (x_target_rel >= tooth_left_edge_rel && x_target_rel < current_tooth_right_edge_rel) {
-            return true; // Found in this tooth
-        }
+    // Ensure x_target_rel is within the structure's bounds for processing
+    if (x_target_rel < 0 || x_target_rel >= total_struct_len) {
+        return info; 
+    }
 
-        // Move to the potential next tooth to the left
-        // The right edge of the next tooth is the left edge of the current tooth, minus spacing
-        current_tooth_right_edge_rel = tooth_left_edge_rel - space_between_teeth;
-        
-        // If the new right edge is already to the left of where teeth can start, or if no space for spacing, stop
-        if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <=0) { // Modified condition to ensure loop termination
-             break;
-        }
-
-
-        current_tooth_w += width_increment;
-        // Safety break if width becomes non-positive (e.g. if increment is negative and large)
-        if (current_tooth_w <= 0 && width_increment < 0) { // Check width_increment to avoid issues if it's positive
-            break; 
-        }
-         // If the tooth width grows so large that its left edge is 0, and there's no space for spacing, break
-        if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) {
-            break;
+    while (current_x_pos < total_struct_len) {
+        if (segment_is_tooth) {
+            double tooth_end_x = current_x_pos + tooth_w;
+            if (x_target_rel >= current_x_pos && x_target_rel < tooth_end_x) {
+                info.is_silicon_tooth_region = true;
+                info.current_dig_depth_at_x = 0.0; // No digging in teeth
+                info.current_tooth_height_at_x = current_tooth_h;
+                return info;
+            }
+            current_x_pos = tooth_end_x;
+            segment_is_tooth = false; // Next segment is a space
+        } else { // Segment is space
+            double space_end_x = current_x_pos + current_space_w;
+            if (x_target_rel >= current_x_pos && x_target_rel < space_end_x) {
+                info.is_silicon_tooth_region = false;
+                info.current_dig_depth_at_x = current_dig_d;
+                info.current_tooth_height_at_x = 0.0; // Not in a tooth
+                return info;
+            }
+            current_x_pos = space_end_x;
+            // Update parameters for the next space and subsequent tooth
+            current_space_w += space_w_increment;
+            current_dig_d += dig_d_increment;
+            if (current_dig_d > si_base_h) { // Cap dig depth
+                current_dig_d = si_base_h;
+            }
+            current_tooth_h = std::max(0.0, current_tooth_h - tooth_h_decrement); // Decrease height for next tooth
+            segment_is_tooth = true; // Next segment is a tooth
         }
     }
-    return false; // Not found in any tooth
+    return info;
 }
 
 // Helper function to save a 2D vector to a CSV file
@@ -101,9 +114,12 @@ void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& 
 void saveGeometryParamsToCSV(const std::string& filename,
                              double h_val,
                              double x_fs, double x_sl,
-                             double y_sibh, double y_th, // y_si_base_height, y_teeth_height
+                             double y_sibh, 
+                             double init_y_th, double y_th_dec, // Modified y_teeth_height
                              double y_vgt,
-                             double x_tw, double x_ts,   // x_teeth_width, x_teeth_spacing
+                             double const_x_tooth_w,
+                             double init_x_space_w, double x_space_w_inc,
+                             double init_y_dig_d, double y_dig_d_inc,
                              double H_tot) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
@@ -115,10 +131,15 @@ void saveGeometryParamsToCSV(const std::string& filename,
     outfile << "x_free_space," << x_fs << std::endl;
     outfile << "x_structure_len," << x_sl << std::endl;
     outfile << "y_si_base_height," << y_sibh << std::endl;
-    outfile << "y_teeth_height," << y_th << std::endl;
+    // outfile << "y_teeth_height," << y_th << std::endl; // Old
+    outfile << "initial_y_teeth_height," << init_y_th << std::endl;
+    outfile << "y_teeth_height_decrement," << y_th_dec << std::endl;
     outfile << "y_vacuum_gap_thick," << y_vgt << std::endl;
-    outfile << "x_teeth_width," << x_tw << std::endl;
-    outfile << "x_teeth_spacing," << x_ts << std::endl;
+    outfile << "x_teeth_width," << const_x_tooth_w << std::endl; 
+    outfile << "initial_x_spacing_width," << init_x_space_w << std::endl;
+    outfile << "x_spacing_width_increment," << x_space_w_inc << std::endl;
+    outfile << "initial_y_spacing_dig_depth," << init_y_dig_d << std::endl;
+    outfile << "y_spacing_dig_depth_increment," << y_dig_d_inc << std::endl;
     outfile << "H_total," << H_tot << std::endl;
     outfile.close();
     std::cout << "Geometry parameters saved to " << filename << std::endl;
@@ -127,31 +148,35 @@ void saveGeometryParamsToCSV(const std::string& filename,
 
 int main() {
     // --- Parameters ---
-    const double h = 1; // Grid spacing in micrometers (µm)
+    const double h = 0.5; // Grid spacing in micrometers (µm)
 
     // Dimensions in µm
     const double L_total = 320.0;
-    // H_total = 2 * (y_si_base_height + y_teeth_height) + y_vacuum_gap_thick
-    // H_total = 2 * (5.0 + 5.0) + 10.0 = 2 * 10.0 + 10.0 = 20.0 + 10.0 = 30.0
-    const double H_total = 30.0;
+    const double H_total = 50.0;
 
     const double x_free_space = 10.0;
     const double x_structure_len = 300.0;
     
-    // New geometry parameters for silicon layers
-    const double y_si_base_height = 5.0;   // µm
-    const double y_teeth_height = 5.0;     // µm
-    // const double x_teeth_width = 10.0;     // µm - Replaced by initial_x_teeth_width_um
-    const double initial_x_teeth_width_um = 10.0; // µm, width of the rightmost tooth
-    const double x_teeth_width_increment_um = 2.0; // µm, width increase for each tooth to the left
-    const double x_teeth_spacing = 10.0;   // µm
-    // const double tooth_period = x_teeth_width + x_teeth_spacing; // No longer used due to varying width
+    // Silicon layer parameters
+    const double y_si_base_height = 10.0;   // µm
+    // const double y_teeth_height = 10.0;     // µm // Replaced
+    const double initial_y_teeth_height_um = 10.0; // Height of the leftmost tooth
+    const double y_teeth_height_decrement_um = 1.0; // Decrease in height for each tooth to the right
+    
+    // New geometry parameters
+    const double x_teeth_width_um = 10.0; // Constant width for all teeth
+    
+    const double initial_x_spacing_width_um = 10.0; // Width of the leftmost space
+    const double x_spacing_width_increment_um = 2.0; // Increment for space width (L to R)
+    
+    const double initial_y_spacing_dig_depth_um = 0.0; // Digging depth for the leftmost space (0 means no initial dig)
+    const double y_spacing_dig_depth_increment_um = 1.0; // Increment for digging depth (L to R)
 
     const double y_vacuum_gap_thick = 10.0; // µm
 
     // SOR parameters
     const double omega = 1.8; // Relaxation factor
-    const double tolerance = 1e-4; // Convergence tolerance
+    const double tolerance = 1e-5; // Convergence tolerance
     const int max_iterations = 500000;
 
     // Material properties (relative permittivity)
@@ -163,7 +188,7 @@ int main() {
     const double V_right = -1000.0; // Volts
 
     // Create output folder
-    const std::string output_folder = "geometria_Denti_sfasati";
+    const std::string output_folder = "geometria_Denti_sfasati_profondi";
 
     // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;
@@ -191,10 +216,12 @@ int main() {
     saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
                             h, 
                             x_free_space, x_structure_len, 
-                            y_si_base_height, y_teeth_height, 
+                            y_si_base_height, 
+                            initial_y_teeth_height_um, y_teeth_height_decrement_um,
                             y_vacuum_gap_thick,
-                            initial_x_teeth_width_um, // Pass initial width
-                            x_teeth_spacing,
+                            x_teeth_width_um, 
+                            initial_x_spacing_width_um, x_spacing_width_increment_um,
+                            initial_y_spacing_dig_depth_um, y_spacing_dig_depth_increment_um,
                             H_total);
 
     // --- Grid Setup ---
@@ -211,54 +238,86 @@ int main() {
     std::vector<std::vector<bool>> fixed_potential_mask(Nx, std::vector<bool>(Ny, false));
 
     // --- Define Material Regions ---
-    const int idx_x_struct_start = static_cast<int>(x_free_space / h);
-    const int idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len) / h);
+    // const int idx_x_struct_start = static_cast<int>(x_free_space / h); // Not directly used in loop below
+    // const int idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len) / h); // Not directly used
 
-    // Y-indices for the layers
-    const int idx_y_bot_si_base_end = static_cast<int>(y_si_base_height / h);
-    const int idx_y_bot_si_teeth_end = static_cast<int>((y_si_base_height + y_teeth_height) / h);
-    
-    const int idx_y_vac_end = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick) / h);
-    // This is where the top Si structure (teeth pointing down) begins.
-    
-    const int idx_y_top_si_teeth_start = idx_y_vac_end; // Start of top Si teeth (bottom edge of top Si structure)
-    const int idx_y_top_si_base_start = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick + y_teeth_height) / h);
-    // The top Si base goes up to Ny-1
+    // Y-indices for the layers (conceptual, not directly used in the refined loop)
+    // const int idx_y_bot_si_base_end = static_cast<int>(y_si_base_height / h);
+    // const int idx_y_bot_si_teeth_end = static_cast<int>((y_si_base_height + y_teeth_height) / h);
+    // const int idx_y_vac_end = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick) / h);
+    // const int idx_y_top_si_teeth_start = idx_y_vac_end; 
+    // const int idx_y_top_si_base_start = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick + y_teeth_height) / h);
 
     for (int i = 0; i < Nx; ++i) {
         for (int j = 0; j < Ny; ++j) {
             eps_r[i][j] = eps_vac; // Default to vacuum
 
-            if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
-                double x_coord_in_structure = (i - idx_x_struct_start) * h;
-                 // Ensure x_coord_in_structure is non-negative (should be by loop construction, but good for safety)
-                if (x_coord_in_structure < 0) x_coord_in_structure = 0;
+            double x_abs = i * h;
+            double y_abs = j * h;
 
-                // Bottom Silicon Layer
-                // Base
-                if (j >= 0 && j <= idx_y_bot_si_base_end) {
-                    eps_r[i][j] = eps_si;
-                }
-                // Teeth (on top of the base)
-                if (j > idx_y_bot_si_base_end && j <= idx_y_bot_si_teeth_end) {
-                    if (is_in_varying_tooth(x_coord_in_structure, x_structure_len, 
-                                            initial_x_teeth_width_um, x_teeth_width_increment_um, 
-                                            x_teeth_spacing)) {
-                        eps_r[i][j] = eps_si;
+            // Check if the point is within the x-range of the structured region
+            if (x_abs >= x_free_space && x_abs < (x_free_space + x_structure_len)) {
+                double x_coord_in_structure = x_abs - x_free_space;
+
+                PointMaterialInfo x_info = get_point_x_info(x_coord_in_structure, x_structure_len,
+                                                            x_teeth_width_um,
+                                                            initial_x_spacing_width_um, x_spacing_width_increment_um,
+                                                            initial_y_spacing_dig_depth_um, y_spacing_dig_depth_increment_um,
+                                                            y_si_base_height,
+                                                            initial_y_teeth_height_um, y_teeth_height_decrement_um);
+                
+                // Define y-boundaries for clarity based on current tooth height
+                double current_tooth_h = x_info.current_tooth_height_at_x; // This is 0 if not in a tooth region
+
+                double y_bottom_base_top = y_si_base_height;
+                double y_bottom_teeth_top = y_si_base_height + (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
+                
+                // The vacuum gap top is now dynamic based on the bottom tooth height
+                // If not in a tooth region, the "effective" tooth height for gap calculation is 0 at that x.
+                // However, the structure definition below handles this by checking is_silicon_tooth_region.
+                // The y_vacuum_gap_thick parameter defines the nominal separation.
+                // The top of the vacuum gap is H_total - y_si_base_height - (top_tooth_height)
+                // Let's define effective boundaries for the current x_info
+                
+                double y_actual_bottom_teeth_tip = y_si_base_height + (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
+                double y_actual_top_teeth_tip = H_total - y_si_base_height - (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
+
+
+                // Bottom Layer Processing
+                // Bottom Base region: 0 <= y_abs < y_bottom_base_top
+                if (y_abs >= 0 && y_abs < y_bottom_base_top) {
+                    if (x_info.is_silicon_tooth_region) {
+                        eps_r[i][j] = eps_si; 
+                    } else { 
+                        if (y_abs < (y_bottom_base_top - x_info.current_dig_depth_at_x)) {
+                            eps_r[i][j] = eps_si; 
+                        } 
                     }
                 }
-
-                // Top Silicon Layer
-                // Base (topmost part)
-                if (j >= idx_y_top_si_base_start && j < Ny) {
-                    eps_r[i][j] = eps_si;
+                // Bottom Teeth region: y_bottom_base_top <= y_abs < y_actual_bottom_teeth_tip
+                else if (x_info.is_silicon_tooth_region && current_tooth_h > 0 &&
+                         y_abs >= y_bottom_base_top && y_abs < y_actual_bottom_teeth_tip) {
+                    eps_r[i][j] = eps_si; 
                 }
-                // Teeth (hanging below the base)
-                if (j >= idx_y_top_si_teeth_start && j < idx_y_top_si_base_start) {
-                     if (is_in_varying_tooth(x_coord_in_structure, x_structure_len, 
-                                             initial_x_teeth_width_um, x_teeth_width_increment_um, 
-                                             x_teeth_spacing)) {
-                        eps_r[i][j] = eps_si;
+                // Vacuum Gap: y_actual_bottom_teeth_tip <= y_abs < y_actual_top_teeth_tip
+                // This region remains eps_vac by default if not part of top/bottom teeth.
+
+                // Top Teeth Region: y_actual_top_teeth_tip <= y_abs < (H_total - y_si_base_height)
+                else if (x_info.is_silicon_tooth_region && current_tooth_h > 0 &&
+                         y_abs >= y_actual_top_teeth_tip && y_abs < (H_total - y_si_base_height)) {
+                     eps_r[i][j] = eps_si; // This is a top tooth
+                }
+                // Top Base Region: (H_total - y_si_base_height) <= y_abs < H_total
+                else if (y_abs >= (H_total - y_si_base_height) && y_abs < H_total) {
+                    double y_top_base_bottom_surface = H_total - y_si_base_height;
+                    if (x_info.is_silicon_tooth_region) {
+                        eps_r[i][j] = eps_si; 
+                    } else { 
+                        // Digging is from the "bottom" of the top base (y_top_base_bottom_surface), upwards.
+                        // Silicon remains if y_abs is beyond (i.e. above) the dug portion.
+                        if (y_abs >= (y_top_base_bottom_surface + x_info.current_dig_depth_at_x)) {
+                            eps_r[i][j] = eps_si; 
+                        } 
                     }
                 }
             }
@@ -266,26 +325,31 @@ int main() {
     }
     
     std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << std::endl;
-    std::cout << "Structure x-indices: " << idx_x_struct_start << " to " << idx_x_struct_end << std::endl;
-    std::cout << "Bottom Si base y-indices: 0 to " << idx_y_bot_si_base_end << std::endl;
-    std::cout << "Bottom Si teeth y-indices: " << idx_y_bot_si_base_end + 1 << " to " << idx_y_bot_si_teeth_end << std::endl;
-    std::cout << "Vacuum gap y-indices (approx): " << idx_y_bot_si_teeth_end + 1 << " to " << idx_y_top_si_teeth_start -1 << std::endl;
-    std::cout << "Top Si teeth y-indices: " << idx_y_top_si_teeth_start << " to " << idx_y_top_si_base_start - 1 << std::endl;
-    std::cout << "Top Si base y-indices: " << idx_y_top_si_base_start << " to " << Ny - 1 << std::endl;
+    // Remove old detailed couts for indices as they are less relevant with the new method
+    // std::cout << "Structure x-indices: " << idx_x_struct_start << " to " << idx_x_struct_end << std::endl;
+    // std::cout << "Bottom Si base y-indices: 0 to " << idx_y_bot_si_base_end << std::endl;
+    // std::cout << "Bottom Si teeth y-indices: " << idx_y_bot_si_base_end + 1 << " to " << idx_y_bot_si_teeth_end << std::endl;
+    // std::cout << "Vacuum gap y-indices (approx): " << idx_y_bot_si_teeth_end + 1 << " to " << idx_y_top_si_teeth_start -1 << std::endl;
+    // std::cout << "Top Si teeth y-indices: " << idx_y_top_si_teeth_start << " to " << idx_y_top_si_base_start - 1 << std::endl;
+    // std::cout << "Top Si base y-indices: " << idx_y_top_si_base_start << " to " << Ny - 1 << std::endl;
 
 
     // --- Boundary Conditions ---
     // Apply to all parts of the silicon structure at the left and right ends of the defined structure length
+    // Need to determine the actual start and end indices of the structure for applying BCs
+    const int actual_idx_x_struct_start = static_cast<int>(x_free_space / h);
+    const int actual_idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len - h) / h); // -h to be inclusive of last point within structure
+
     for (int j = 0; j < Ny; ++j) {
-        // Check if the point (idx_x_struct_start, j) is silicon
-        if (eps_r[idx_x_struct_start][j] == eps_si) {
-            V[idx_x_struct_start][j] = V_left;
-            fixed_potential_mask[idx_x_struct_start][j] = true;
+        // Check if the point (actual_idx_x_struct_start, j) is silicon
+        if (actual_idx_x_struct_start >=0 && actual_idx_x_struct_start < Nx && eps_r[actual_idx_x_struct_start][j] == eps_si) {
+            V[actual_idx_x_struct_start][j] = V_left;
+            fixed_potential_mask[actual_idx_x_struct_start][j] = true;
         }
-        // Check if the point (idx_x_struct_end, j) is silicon
-        if (eps_r[idx_x_struct_end][j] == eps_si) {
-            V[idx_x_struct_end][j] = V_right;
-            fixed_potential_mask[idx_x_struct_end][j] = true;
+        // Check if the point (actual_idx_x_struct_end, j) is silicon
+        if (actual_idx_x_struct_end >= 0 && actual_idx_x_struct_end < Nx && eps_r[actual_idx_x_struct_end][j] == eps_si) {
+            V[actual_idx_x_struct_end][j] = V_right;
+            fixed_potential_mask[actual_idx_x_struct_end][j] = true;
         }
     }
 

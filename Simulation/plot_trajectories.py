@@ -55,7 +55,7 @@ def load_2d_csv(filename):
         return None
 
 def main():
-    input_base_folder = "geometria_Denti_sfasati"
+    input_base_folder = "geometria_Denti_sfasati_profondi"
     trajectories_folder = os.path.join(input_base_folder, "proton_trajectories")
     output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.pdf")
     output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.pdf")
@@ -104,7 +104,7 @@ def main():
     if not trajectory_files:
         print(f"No trajectory files found in {trajectories_folder}")
     
-    num_trajectories_to_plot = min(len(trajectory_files), 100) 
+    num_trajectories_to_plot = min(len(trajectory_files), 1000) 
     plotted_traj_legend_added = False
     
     for i, traj_file in enumerate(trajectory_files):

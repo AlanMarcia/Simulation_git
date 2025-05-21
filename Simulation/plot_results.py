@@ -18,7 +18,7 @@ def load_2d_csv(filename):
 
 def plot_results():
     # Create output folder
-    output_folder = "geometria_Denti_sfasati"
+    output_folder = "geometria_Denti_sfasati_profondi"
     os.makedirs(output_folder, exist_ok=True)
 
     # File paths
