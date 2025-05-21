@@ -28,7 +28,7 @@ const double M_PROTON = 1.67262192e-27; // kg (SI)
 const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
-const int NUM_PROTONS = 1000;
+const int NUM_PROTONS = 10000;
 const double TIME_STEP_S = 1e-12;       // Time step in seconds (SI)
 const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
 const double OUTPUT_TIME_INTERVAL_S = 1e-10; // Interval for writing trajectory data (SI)
@@ -43,17 +43,10 @@ struct Proton {
 };
 
 struct GeometryParameters {
-    double h;         // Grid spacing in meters (SI)
+    double h;         // Grid spacing in meters (SI) from geometry_params.csv
     double x_fs;      // x_free_space in meters (SI)
     double x_sl;      // x_structure_len in meters (SI)
-    double y_vgt;     // y_vacuum_gap_thick in meters (SI)
-    double H_tot_geom; // H_total (from geometry file) in meters (SI)
-
-    // Parameters for initial proton distribution
-    double y_si_base_height; // y_si_base_height in meters (SI)
-    double initial_y_teeth_height; // initial_y_teeth_height in meters (SI)
-    // Removed: initial_x_teeth_width, x_teeth_width_increment, x_teeth_spacing, y_teeth_height (if initial_y_teeth_height is used)
-    // Other detailed varying geometry parameters are not needed here if using eps_r map for collision.
+    // Removed: y_vgt, H_tot_geom, y_si_base_height, initial_y_teeth_height
 };
 
 // --- Helper Functions ---
@@ -195,8 +188,10 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         return false;
     }
     std::string line;
-    // Initialize potentially optional parameters
-    geom.initial_y_teeth_height = 0.0; 
+    geom.h = 0.0; // Initialize to detect if not loaded
+    geom.x_fs = 0.0;
+    geom.x_sl = 0.0;
+    bool h_loaded = false, x_fs_loaded = false, x_sl_loaded = false;
 
     while (std::getline(file, line)) {
         std::stringstream ss(line);
@@ -212,32 +207,143 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         }
         double value_m = value_um * 1.0e-6;     // Convert to meters
 
-        if (key == "h") geom.h = value_m;
-        else if (key == "x_free_space") geom.x_fs = value_m;
-        else if (key == "x_structure_len") geom.x_sl = value_m;
-        else if (key == "y_vacuum_gap_thick") geom.y_vgt = value_m;
-        else if (key == "H_total") geom.H_tot_geom = value_m;
-        else if (key == "y_si_base_height") geom.y_si_base_height = value_m;
-        else if (key == "initial_y_teeth_height") geom.initial_y_teeth_height = value_m;
-        else if (key == "y_teeth_height" && geom.initial_y_teeth_height == 0.0) { 
-            // Fallback if initial_y_teeth_height is not present but y_teeth_height is
-            geom.initial_y_teeth_height = value_m;
-        }
-        // Other detailed geometry parameters are ignored as they are not needed for collision with eps_r map
+        if (key == "h") { geom.h = value_m; h_loaded = true; }
+        else if (key == "x_free_space") { geom.x_fs = value_m; x_fs_loaded = true; }
+        else if (key == "x_structure_len") { geom.x_sl = value_m; x_sl_loaded = true; }
     }
     file.close();
-    // Basic validation
-    if (geom.h <= 0 || geom.y_vgt <= 0 || geom.H_tot_geom <= 0 || geom.y_si_base_height < 0) {
-        std::cerr << "Warning: Some critical geometry parameters (h, y_vgt, H_tot_geom, y_si_base_height) are zero, negative or not loaded." << std::endl;
+    
+    if (!h_loaded) {
+        std::cout << "Info: Grid spacing 'h' not found in " << filename << ". Will attempt to derive from coordinate files." << std::endl;
     }
-    if (geom.initial_y_teeth_height < 0) {
-         std::cerr << "Warning: initial_y_teeth_height is negative." << std::endl;
+    if (!x_fs_loaded || !x_sl_loaded) {
+        std::cout << "Info: 'x_free_space' or 'x_structure_len' not found in " << filename << ". Will use fallbacks if needed for vacuum search." << std::endl;
     }
-    std::cout << "Geometry parameters loaded. h (m): " << geom.h 
-              << ", y_si_base_height (m): " << geom.y_si_base_height 
-              << ", initial_y_teeth_height (m): " << geom.initial_y_teeth_height 
-              << ", y_vgt (m): " << geom.y_vgt << std::endl;
+    
+    std::cout << "Geometry parameters from CSV. h (m): " << geom.h 
+              << ", x_fs (m): " << geom.x_fs 
+              << ", x_sl (m): " << geom.x_sl << std::endl;
     return true;
+}
+
+std::pair<double, double> find_vacuum_channel_from_map(
+    const std::vector<std::vector<double>>& eps_r_map,
+    const std::vector<double>& x_coords_m, 
+    const std::vector<double>& y_coords_m, 
+    double h_grid_m_from_coords, 
+    double x_search_start_m,     
+    double x_search_end_m) {      
+
+    const double EPS_SI_SIM = 11.7;
+    const double EPS_VAC_SIM = 1.0;
+    const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0;
+
+    int Nx_map = eps_r_map.size();
+    if (Nx_map == 0) return {y_coords_m.front() + (y_coords_m.back()-y_coords_m.front())/3.0, y_coords_m.back() - (y_coords_m.back()-y_coords_m.front())/3.0};
+    int Ny_map = eps_r_map[0].size();
+    if (Ny_map == 0 || y_coords_m.empty()) return {0.0, 0.0}; // Should not happen with earlier checks
+
+    double x_coord_spacing = (x_coords_m.size() > 1) ? (x_coords_m[1] - x_coords_m[0]) : 1.0;
+    if (x_coord_spacing <= 0) x_coord_spacing = 1.0; // Avoid division by zero
+
+    int idx_x_start_search = static_cast<int>(std::max(0.0, x_search_start_m / x_coord_spacing ));
+    int idx_x_end_search = static_cast<int>(std::min((double)Nx_map - 1, x_search_end_m / x_coord_spacing ));
+    
+    idx_x_start_search = std::min(idx_x_start_search, Nx_map -1);
+    idx_x_end_search = std::min(idx_x_end_search, Nx_map-1);
+
+    if (idx_x_start_search < 0) idx_x_start_search = 0;
+    if (idx_x_end_search < 0) idx_x_end_search = Nx_map -1;
+
+
+    if (idx_x_start_search > idx_x_end_search || Nx_map == 0) { 
+        std::cout << "Warning: Invalid x-search range for vacuum. Analyzing central 50% of x-domain." << std::endl;
+        idx_x_start_search = std::max(0, Nx_map / 4); 
+        idx_x_end_search = std::min(Nx_map - 1, Nx_map * 3 / 4);
+        if (idx_x_start_search > idx_x_end_search && Nx_map > 0) idx_x_end_search = idx_x_start_search;
+    }
+    if (idx_x_start_search > idx_x_end_search && Nx_map == 0) {idx_x_start_search = 0; idx_x_end_search = -1;}
+
+
+    double overall_vac_min_y = y_coords_m.back(); 
+    double overall_vac_max_y = y_coords_m.front();
+    bool found_any_gap_in_any_column = false;
+
+    for (int i = idx_x_start_search; i <= idx_x_end_search; ++i) {
+        int j_bottom_material_top_idx = -1; // Index of the highest cell of bottom material
+        for (int j = 0; j < Ny_map; ++j) {
+            if (eps_r_map[i][j] >= material_threshold) {
+                j_bottom_material_top_idx = j;
+            } else {
+                break; // First vacuum cell found, so material below ends at j-1 or this is start of domain
+            }
+        }
+
+        int j_top_material_bottom_idx = -1; // Index of the lowest cell of top material
+        for (int j = Ny_map - 1; j >= 0; --j) {
+            if (eps_r_map[i][j] >= material_threshold) {
+                j_top_material_bottom_idx = j;
+            } else {
+                break; // First vacuum cell found from top
+            }
+        }
+        
+        double col_vac_start_y, col_vac_end_y;
+
+        if (j_bottom_material_top_idx == -1) { // All vacuum from bottom
+            col_vac_start_y = y_coords_m.front();
+        } else {
+            col_vac_start_y = y_coords_m[j_bottom_material_top_idx] + h_grid_m_from_coords; // Start of vacuum is top of this material cell
+        }
+
+        if (j_top_material_bottom_idx == -1) { // All vacuum to top
+            col_vac_end_y = y_coords_m.back();
+        } else {
+            col_vac_end_y = y_coords_m[j_top_material_bottom_idx]; // End of vacuum is bottom of this material cell
+        }
+        col_vac_start_y = std::max(col_vac_start_y, y_coords_m.front());
+        col_vac_end_y = std::min(col_vac_end_y, y_coords_m.back());
+
+
+        if (col_vac_start_y < col_vac_end_y) { // Valid gap in this column
+            if (!found_any_gap_in_any_column) {
+                overall_vac_min_y = col_vac_start_y;
+                overall_vac_max_y = col_vac_end_y;
+                found_any_gap_in_any_column = true;
+            } else {
+                // Intersection: take the highest min_y and lowest max_y
+                overall_vac_min_y = std::max(overall_vac_min_y, col_vac_start_y);
+                overall_vac_max_y = std::min(overall_vac_max_y, col_vac_end_y);
+            }
+        }
+    }
+
+    if (!found_any_gap_in_any_column || overall_vac_min_y >= overall_vac_max_y) {
+        std::cerr << "Warning: Could not determine a consistent vacuum channel from epsilon map." << std::endl;
+        double H_sim_total = y_coords_m.back() - y_coords_m.front();
+        overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0;
+        overall_vac_max_y = y_coords_m.back() - H_sim_total / 3.0;
+        std::cout << "Using fallback vacuum channel: [" << overall_vac_min_y << ", " << overall_vac_max_y << "]" << std::endl;
+    }
+    
+    double gap_thickness = overall_vac_max_y - overall_vac_min_y;
+    if (gap_thickness > 2.0 * h_grid_m_from_coords) { 
+        overall_vac_min_y += h_grid_m_from_coords * 0.1; 
+        overall_vac_max_y -= h_grid_m_from_coords * 0.1;
+    }
+     if (overall_vac_min_y >= overall_vac_max_y) { 
+        // Revert margin if it made gap invalid
+        overall_vac_min_y -= h_grid_m_from_coords * 0.1;
+        overall_vac_max_y += h_grid_m_from_coords * 0.1;
+        // Clamp to original bounds if necessary
+        if (!found_any_gap_in_any_column) { // If still no gap, use broad fallback
+             double H_sim_total = y_coords_m.back() - y_coords_m.front();
+             overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0;
+             overall_vac_max_y = y_coords_m.back() - H_sim_total / 3.0;
+        }
+     }
+
+    return {overall_vac_min_y, overall_vac_max_y};
 }
 
 std::pair<double, double> get_field_at_point(
@@ -332,22 +438,17 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
 int main() {
     std::cout << std::fixed << std::setprecision(6);
 
-    const std::string input_base_folder = "geometria_Denti_sfasati_profondi";
+    const std::string input_base_folder = "geometria_piana";
     const std::string output_traj_folder = input_base_folder + "/proton_trajectories";
     create_directory_if_not_exists(output_traj_folder);
 
     GeometryParameters geom;
     if (!load_geometry_params(input_base_folder + "/geometry_params.csv", geom)) {
-        std::cerr << "Failed to load geometry parameters. Exiting." << std::endl;
-        return 1;
+        std::cerr << "Warning: Problem loading from geometry_params.csv. Proceeding with defaults/derivations." << std::endl;
+        // geom.h, geom.x_fs, geom.x_sl will be 0.0 if file not found or keys missing.
     }
 
-    // Set initial X position based on loaded geometry to be inside the active region
-    const double initial_x_position_m = geom.x_fs + 1.0e-6; // 1 µm (converted to m) into the structure start
-    std::cout << "Protons will start at x = " << initial_x_position_m * 1e6 << " um." << std::endl; // Display in um for clarity
-
     std::vector<double> x_coords, y_coords;
-    // Load coordinates and convert them from µm (in CSV) to m for simulation
     if (!load_1d_csv(input_base_folder + "/x_coordinates.csv", x_coords, true /*convert_to_meters*/) ||
         !load_1d_csv(input_base_folder + "/y_coordinates.csv", y_coords, true /*convert_to_meters*/)) {
         std::cerr << "Failed to load coordinates. Exiting." << std::endl;
@@ -360,19 +461,55 @@ int main() {
         std::cerr << "Coordinate data is empty. Exiting." << std::endl;
         return 1;
     }
-    double L_total_sim = x_coords.back(); // Now in meters
-    double H_total_sim = y_coords.back(); // Now in meters
+    double L_total_sim = x_coords.back(); 
+    double H_total_sim = y_coords.back(); 
 
-     // Verify h from geom matches h from coordinates if needed (all in meters now)
-    if (Nx > 1 && Ny > 1 && (std::abs(geom.h - (x_coords[1] - x_coords[0])) > 1e-12 || std::abs(geom.h - (y_coords[1] - y_coords[0])) > 1e-12)) {
-        std::cout << "Warning: h from geometry_params.csv (" << geom.h * 1e6 // Display in um
-                  << " um) differs from h derived from coordinates (" << (x_coords[1]-x_coords[0]) * 1e6 << " um, " // Display in um
-                  << (y_coords[1]-y_coords[0]) * 1e6 << " um). Using h from geometry_params.csv for interpolation." << std::endl; // Display in um
+    double h_from_coords_x = (Nx > 1) ? (x_coords[1] - x_coords[0]) : 0.0;
+    double h_from_coords_y = (Ny > 1) ? (y_coords[1] - y_coords[0]) : 0.0;
+    double h_for_simulation = geom.h; 
+
+    if (geom.h <= 1e-9) { // geom.h not loaded or zero
+        if (h_from_coords_x > 1e-9 && h_from_coords_y > 1e-9 && std::abs(h_from_coords_x - h_from_coords_y) < 1e-9) { // Use 1e-9 as effective zero for double
+            h_for_simulation = h_from_coords_x;
+            std::cout << "Using h derived from coordinate files: " << h_for_simulation * 1e6 << " um." << std::endl;
+        } else if (h_from_coords_x > 1e-9) { // If only x is reliable
+             h_for_simulation = h_from_coords_x;
+             std::cout << "Warning: y-coordinate spacing inconsistent or zero. Using h from x-coordinates: " << h_for_simulation * 1e6 << " um." << std::endl;
+        } else if (h_from_coords_y > 1e-9) { // If only y is reliable
+             h_for_simulation = h_from_coords_y;
+             std::cout << "Warning: x-coordinate spacing inconsistent or zero. Using h from y-coordinates: " << h_for_simulation * 1e6 << " um." << std::endl;
+        }
+         else {
+            std::cerr << "Error: h from geometry_params.csv is invalid, and h cannot be reliably derived from coordinate files. Exiting." << std::endl;
+            return 1;
+        }
+    } else { 
+         if ( (h_from_coords_x > 1e-9 && std::abs(geom.h - h_from_coords_x) > 1e-9) || 
+              (h_from_coords_y > 1e-9 && std::abs(geom.h - h_from_coords_y) > 1e-9) ) {
+            std::cout << "Warning: h from geometry_params.csv (" << geom.h * 1e6 
+                      << " um) differs from h derived from coordinates (x: " << h_from_coords_x * 1e6 
+                      << " um, y: " << h_from_coords_y * 1e6 
+                      << " um). Using h from geometry_params.csv: " << h_for_simulation * 1e6 << " um." << std::endl;
+        }
     }
+     if (h_for_simulation <= 1e-9) {
+        std::cerr << "Error: Final h_for_simulation is invalid (zero or negative). Exiting." << std::endl;
+        return 1;
+     }
 
 
-    std::vector<std::vector<double>> Ex_field, Ey_field; // Will be loaded in V/m
-    std::vector<std::vector<double>> eps_r_map_data;     // For collision detection
+    double initial_x_position_m;
+    if (geom.x_fs > 1e-9) {
+        initial_x_position_m = geom.x_fs + 1.0e-6; 
+    } else {
+        initial_x_position_m = L_total_sim * 0.05; 
+        std::cout << "Warning: x_free_space from CSV is zero or not loaded. Using fallback initial x position: " << initial_x_position_m * 1e6 << " um." << std::endl;
+    }
+    std::cout << "Protons will start at x = " << initial_x_position_m * 1e6 << " um." << std::endl;
+
+
+    std::vector<std::vector<double>> Ex_field, Ey_field; 
+    std::vector<std::vector<double>> eps_r_map_data;     
 
     if (!load_field_csv(input_base_folder + "/electric_field_x.csv", Ex_field, Nx, Ny) ||
         !load_field_csv(input_base_folder + "/electric_field_y.csv", Ey_field, Nx, Ny) ||
@@ -381,43 +518,40 @@ int main() {
         return 1;
     }
     std::cout << "Data loaded successfully. Nx=" << Nx << ", Ny=" << Ny << std::endl;
+    
+    double x_search_start_for_gap = geom.x_fs;
+    double x_search_end_for_gap = geom.x_fs + geom.x_sl;
 
-    std::vector<Proton> protons(NUM_PROTONS);
-    std::mt19937 rng(std::random_device{}());
-    // Ensure y-distribution is within the vacuum gap correctly defined by new geometry (all in meters)
-    double vacuum_gap_start_y = geom.y_si_base_height + geom.initial_y_teeth_height; // Use initial_y_teeth_height
-    double vacuum_gap_end_y = vacuum_gap_start_y + geom.y_vgt;
-
-    if (vacuum_gap_start_y >= vacuum_gap_end_y) {
-        std::cerr << "Error: Vacuum gap has zero or negative thickness based on new geometry parameters." << std::endl;
-        std::cerr << "y_si_base_height (m): " << geom.y_si_base_height 
-                  << ", initial_y_teeth_height (m): " << geom.initial_y_teeth_height // Changed y_teeth_height to initial_y_teeth_height
-                  << ", y_vgt (m): " << geom.y_vgt << std::endl;
-        std::cerr << "Calculated vacuum_gap_start_y (m): " << vacuum_gap_start_y 
-                  << ", vacuum_gap_end_y (m): " << vacuum_gap_end_y << std::endl;
-
-        // Fallback or safe default if parameters are problematic
-        if (geom.H_tot_geom > 0.0) { // if H_total_geom is available and positive (in meters)
-             vacuum_gap_start_y = geom.H_tot_geom / 3.0;
-             vacuum_gap_end_y = geom.H_tot_geom * 2.0 / 3.0;
-             std::cout << "Warning: Using fallback y-distribution for protons due to problematic gap params." << std::endl;
-        } else { // Absolute fallback
-            vacuum_gap_start_y = H_total_sim / 3.0; // Use H_total_sim if geom.H_tot_geom is bad
-            vacuum_gap_end_y = H_total_sim * 2.0 / 3.0;
-             std::cout << "Warning: Using ABSOLUTE fallback y-distribution for protons." << std::endl;
-        }
-         if (vacuum_gap_start_y >= vacuum_gap_end_y || vacuum_gap_start_y < 0 || vacuum_gap_end_y > H_total_sim ) { // Final check on fallback
-            std::cerr << "Critical Error: Fallback y-distribution also invalid or out of bounds. Exiting." << std::endl;
-            return 1;
-         }
+    if (geom.x_fs <= 1e-9 || geom.x_sl <= 1e-9) { 
+        std::cout << "Warning: x_fs or x_sl from CSV is zero/not loaded. Analyzing central 80% of x-domain for vacuum gap." << std::endl;
+        x_search_start_for_gap = L_total_sim * 0.1;
+        x_search_end_for_gap = L_total_sim * 0.9;
     }
-    std::cout << "Proton initial y-distribution range (m): [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
-    std::uniform_real_distribution<double> dist_y(vacuum_gap_start_y, vacuum_gap_end_y); // Range in meters
+    
+    double h_coords_for_vacuum_find = (h_from_coords_y > 1e-9) ? h_from_coords_y : h_from_coords_x;
+    if (h_coords_for_vacuum_find <= 1e-9) h_coords_for_vacuum_find = h_for_simulation; // Last resort
+
+
+    std::pair<double, double> vacuum_channel = find_vacuum_channel_from_map(
+        eps_r_map_data, x_coords, y_coords, h_coords_for_vacuum_find,
+        x_search_start_for_gap, x_search_end_for_gap
+    );
+    double vacuum_gap_start_y = vacuum_channel.first;
+    double vacuum_gap_end_y = vacuum_channel.second;
+
+    if (vacuum_gap_start_y >= vacuum_gap_end_y - (h_for_simulation * 0.5) ) { // Ensure gap is at least half a cell thick
+        std::cerr << "Critical Error: Determined vacuum gap is too small or invalid [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]. Exiting." << std::endl;
+        return 1;
+    }
+    std::cout << "Proton initial y-distribution range (m) from epsilon_map: [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
+    
+    std::vector<Proton> protons(NUM_PROTONS);
+    std::mt19937 rng(std::random_device{});
+    std::uniform_real_distribution<double> dist_y(vacuum_gap_start_y, vacuum_gap_end_y); 
 
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
-        protons[i].x = 5e-6; // Initial x position in meters (5 µm)
-        //initial_x_position_m; 
+        protons[i].x = initial_x_position_m; 
         protons[i].y = dist_y(rng); // y in meters
         protons[i].vx = 0.0; // Initial velocity in m/s
         protons[i].vy = 0.0; // Initial velocity in m/s
@@ -463,28 +597,28 @@ int main() {
             double k4x, k4y, k4vx, k4vy;
 
             // k1
-            a1 = get_acceleration(p.x, p.y, x_coords, y_coords, Ex_field, Ey_field, geom.h, Nx, Ny);
+            a1 = get_acceleration(p.x, p.y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
             k1vx = TIME_STEP_S * a1.first;
             k1vy = TIME_STEP_S * a1.second;
             k1x = TIME_STEP_S * p.vx;
             k1y = TIME_STEP_S * p.vy;
 
             // k2
-            a2 = get_acceleration(p.x + k1x/2.0, p.y + k1y/2.0, x_coords, y_coords, Ex_field, Ey_field, geom.h, Nx, Ny);
+            a2 = get_acceleration(p.x + k1x/2.0, p.y + k1y/2.0, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
             k2vx = TIME_STEP_S * a2.first;
             k2vy = TIME_STEP_S * a2.second;
             k2x = TIME_STEP_S * (p.vx + k1vx/2.0);
             k2y = TIME_STEP_S * (p.vy + k1vy/2.0);
 
             // k3
-            a3 = get_acceleration(p.x + k2x/2.0, p.y + k2y/2.0, x_coords, y_coords, Ex_field, Ey_field, geom.h, Nx, Ny);
+            a3 = get_acceleration(p.x + k2x/2.0, p.y + k2y/2.0, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
             k3vx = TIME_STEP_S * a3.first;
             k3vy = TIME_STEP_S * a3.second;
             k3x = TIME_STEP_S * (p.vx + k2vx/2.0);
             k3y = TIME_STEP_S * (p.vy + k2vy/2.0);
 
             // k4
-            a4 = get_acceleration(p.x + k3x, p.y + k3y, x_coords, y_coords, Ex_field, Ey_field, geom.h, Nx, Ny);
+            a4 = get_acceleration(p.x + k3x, p.y + k3y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
             k4vx = TIME_STEP_S * a4.first;
             k4vy = TIME_STEP_S * a4.second;
             k4x = TIME_STEP_S * (p.vx + k3vx);
@@ -509,7 +643,7 @@ int main() {
             }
 
             // Check if proton hit material or went out of other bounds (all checks in meters)
-            if (is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, geom.h, L_total_sim, H_total_sim)) {
+            if (is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
                 p.active = false;
                 if (p.trajectory_file.is_open()) {
                     p.trajectory_file.close();
