@@ -53,7 +53,9 @@ struct GeometryParameters {
     // New parameters for toothed geometry
     double y_si_base_height; // y_si_base_height in meters (SI)
     double y_teeth_height;   // y_teeth_height in meters (SI)
-    double x_teeth_width;    // x_teeth_width in meters (SI)
+    // double x_teeth_width;    // x_teeth_width in meters (SI) - Replaced
+    double initial_x_teeth_width; // Width of the rightmost tooth in meters (SI)
+    double x_teeth_width_increment; // Increment of tooth width from right to left in meters (SI)
     double x_teeth_spacing;  // x_teeth_spacing in meters (SI)
 };
 
@@ -155,6 +157,10 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         return false;
     }
     std::string line;
+    // Initialize x_teeth_width_increment to 0.0 in case it's not in the CSV
+    geom.x_teeth_width_increment = 0.0; 
+    geom.initial_x_teeth_width = 0.0; // Initialize in case not present
+
     while (std::getline(file, line)) {
         std::stringstream ss(line);
         std::string key, value_str;
@@ -177,19 +183,21 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         else if (key == "H_total") geom.H_tot_geom = value_m;
         else if (key == "y_si_base_height") geom.y_si_base_height = value_m;
         else if (key == "y_teeth_height") geom.y_teeth_height = value_m;
-        else if (key == "x_teeth_width") geom.x_teeth_width = value_m;
+        // else if (key == "x_teeth_width") geom.x_teeth_width = value_m; // Old parameter
+        else if (key == "x_teeth_width") geom.initial_x_teeth_width = value_m; // Now initial width
+        else if (key == "x_teeth_width_increment") geom.x_teeth_width_increment = value_m; // New parameter
         else if (key == "x_teeth_spacing") geom.x_teeth_spacing = value_m;
     }
     file.close();
     // Basic validation of loaded parameters
     if (geom.h <= 0 || geom.x_sl <= 0 || geom.y_vgt <= 0 || geom.H_tot_geom <= 0 ||
         geom.y_si_base_height < 0 || geom.y_teeth_height < 0 || 
-        geom.x_teeth_width < 0 || geom.x_teeth_spacing < 0) {
+        geom.initial_x_teeth_width < 0 || geom.x_teeth_spacing < 0) { // Use initial_x_teeth_width
         std::cerr << "Warning: Some critical geometry parameters are zero, negative or not loaded." << std::endl;
         // Could return false here if strict validation is needed
     }
-    if (geom.x_teeth_width > 0 && geom.x_teeth_spacing < 0) { // Spacing can be 0 for continuous teeth
-         std::cerr << "Warning: x_teeth_width is positive but x_teeth_spacing is negative." << std::endl;
+    if (geom.initial_x_teeth_width > 0 && geom.x_teeth_spacing < 0) { // Spacing can be 0 for continuous teeth. Use initial_x_teeth_width
+         std::cerr << "Warning: initial_x_teeth_width is positive but x_teeth_spacing is negative." << std::endl;
     }
     return true;
 }
@@ -264,17 +272,26 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
         if (py >= 0.0 && py <= y_bot_si_base_top) return true;
 
         // Check bottom teeth
-        if (geom.y_teeth_height > 0 && geom.x_teeth_width > 0) {
+        if (geom.y_teeth_height > 0) { // Check only for teeth height
             if (py > y_bot_si_base_top && py <= y_bot_si_teeth_top) {
-                double tooth_period = geom.x_teeth_width + geom.x_teeth_spacing;
-                if (tooth_period > 1e-12) { // Avoid division by zero if period is effectively zero
-                    double x_coord_in_structure = px - x_struct_start;
-                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
-                    if (pos_in_period < geom.x_teeth_width) {
+                double x_coord_in_structure = px - x_struct_start;
+                double current_tooth_right_edge_rel = geom.x_sl;
+                double current_tooth_w = geom.initial_x_teeth_width;
+
+                while (current_tooth_right_edge_rel > 0) {
+                    double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
+                    if (tooth_left_edge_rel < 0) tooth_left_edge_rel = 0;
+
+                    if (x_coord_in_structure >= tooth_left_edge_rel && x_coord_in_structure < current_tooth_right_edge_rel) {
                         return true; // Inside a bottom tooth
                     }
-                } else if (geom.x_teeth_width > 0) { // Continuous tooth if period is zero but width is not
-                     return true;
+
+                    current_tooth_right_edge_rel = tooth_left_edge_rel - geom.x_teeth_spacing;
+                    if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <= 0) break;
+                    
+                    current_tooth_w += geom.x_teeth_width_increment;
+                    if (current_tooth_w <= 0 && geom.x_teeth_width_increment < 0) break;
+                    if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) break;
                 }
             }
         }
@@ -288,18 +305,27 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
         if (py >= y_top_si_base_bottom && py <= H_total_sim) return true;
         
         // Check top teeth
-        if (geom.y_teeth_height > 0 && geom.x_teeth_width > 0) {
+        if (geom.y_teeth_height > 0) { // Check only for teeth height
             if (py >= y_top_si_teeth_bottom && py < y_top_si_base_bottom) {
-                 double tooth_period = geom.x_teeth_width + geom.x_teeth_spacing;
-                 if (tooth_period > 1e-12) {
-                    double x_coord_in_structure = px - x_struct_start;
-                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
-                    if (pos_in_period < geom.x_teeth_width) {
+                 double x_coord_in_structure = px - x_struct_start;
+                 double current_tooth_right_edge_rel = geom.x_sl;
+                 double current_tooth_w = geom.initial_x_teeth_width;
+
+                 while (current_tooth_right_edge_rel > 0) {
+                    double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
+                    if (tooth_left_edge_rel < 0) tooth_left_edge_rel = 0;
+
+                    if (x_coord_in_structure >= tooth_left_edge_rel && x_coord_in_structure < current_tooth_right_edge_rel) {
                         return true; // Inside a top tooth
                     }
-                } else if (geom.x_teeth_width > 0) { // Continuous tooth
-                    return true;
-                }
+                    
+                    current_tooth_right_edge_rel = tooth_left_edge_rel - geom.x_teeth_spacing;
+                    if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <= 0) break;
+
+                    current_tooth_w += geom.x_teeth_width_increment;
+                    if (current_tooth_w <= 0 && geom.x_teeth_width_increment < 0) break;
+                    if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) break;
+                 }
             }
         }
     }
@@ -310,7 +336,7 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
 int main() {
     std::cout << std::fixed << std::setprecision(6);
 
-    const std::string input_base_folder = "geometria_Denti_uguali";
+    const std::string input_base_folder = "geometria_Denti_sfasati";
     const std::string output_traj_folder = input_base_folder + "/proton_trajectories";
     create_directory_if_not_exists(output_traj_folder);
 

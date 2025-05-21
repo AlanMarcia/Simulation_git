@@ -20,6 +20,52 @@
     #define STAT_FUNC stat
 #endif
 
+// Helper function to determine if a point is inside a tooth with varying width
+// Teeth get wider from right to left
+bool is_in_varying_tooth(double x_target_rel, // x-coordinate relative to the start of the structure
+                         double total_struct_len,
+                         double rightmost_tooth_width,
+                         double width_increment, // e.g., 2.0um for teeth getting wider to the left
+                         double space_between_teeth) {
+    double current_tooth_right_edge_rel = total_struct_len; // Tracks the right edge of the current tooth being considered, relative to structure start
+    double current_tooth_w = rightmost_tooth_width;
+
+    while (current_tooth_right_edge_rel > 0) {
+        double tooth_left_edge_rel = current_tooth_right_edge_rel - current_tooth_w;
+        
+        // Ensure the tooth does not extend beyond the left boundary of the structure
+        if (tooth_left_edge_rel < 0) {
+            tooth_left_edge_rel = 0;
+        }
+
+        // Check if x_target_rel is within [tooth_left_edge_rel, current_tooth_right_edge_rel)
+        if (x_target_rel >= tooth_left_edge_rel && x_target_rel < current_tooth_right_edge_rel) {
+            return true; // Found in this tooth
+        }
+
+        // Move to the potential next tooth to the left
+        // The right edge of the next tooth is the left edge of the current tooth, minus spacing
+        current_tooth_right_edge_rel = tooth_left_edge_rel - space_between_teeth;
+        
+        // If the new right edge is already to the left of where teeth can start, or if no space for spacing, stop
+        if (current_tooth_right_edge_rel <= 0 && tooth_left_edge_rel <=0) { // Modified condition to ensure loop termination
+             break;
+        }
+
+
+        current_tooth_w += width_increment;
+        // Safety break if width becomes non-positive (e.g. if increment is negative and large)
+        if (current_tooth_w <= 0 && width_increment < 0) { // Check width_increment to avoid issues if it's positive
+            break; 
+        }
+         // If the tooth width grows so large that its left edge is 0, and there's no space for spacing, break
+        if (tooth_left_edge_rel == 0 && current_tooth_right_edge_rel <= 0) {
+            break;
+        }
+    }
+    return false; // Not found in any tooth
+}
+
 // Helper function to save a 2D vector to a CSV file
 void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
     std::ofstream outfile(filename);
@@ -81,7 +127,7 @@ void saveGeometryParamsToCSV(const std::string& filename,
 
 int main() {
     // --- Parameters ---
-    const double h = 0.5; // Grid spacing in micrometers (µm)
+    const double h = 1; // Grid spacing in micrometers (µm)
 
     // Dimensions in µm
     const double L_total = 320.0;
@@ -95,9 +141,11 @@ int main() {
     // New geometry parameters for silicon layers
     const double y_si_base_height = 5.0;   // µm
     const double y_teeth_height = 5.0;     // µm
-    const double x_teeth_width = 10.0;     // µm
+    // const double x_teeth_width = 10.0;     // µm - Replaced by initial_x_teeth_width_um
+    const double initial_x_teeth_width_um = 10.0; // µm, width of the rightmost tooth
+    const double x_teeth_width_increment_um = 2.0; // µm, width increase for each tooth to the left
     const double x_teeth_spacing = 10.0;   // µm
-    const double tooth_period = x_teeth_width + x_teeth_spacing;
+    // const double tooth_period = x_teeth_width + x_teeth_spacing; // No longer used due to varying width
 
     const double y_vacuum_gap_thick = 10.0; // µm
 
@@ -115,7 +163,7 @@ int main() {
     const double V_right = -1000.0; // Volts
 
     // Create output folder
-    const std::string output_folder = "geometria_Denti_uguali";
+    const std::string output_folder = "geometria_Denti_sfasati";
 
     // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;
@@ -145,7 +193,8 @@ int main() {
                             x_free_space, x_structure_len, 
                             y_si_base_height, y_teeth_height, 
                             y_vacuum_gap_thick,
-                            x_teeth_width, x_teeth_spacing,
+                            initial_x_teeth_width_um, // Pass initial width
+                            x_teeth_spacing,
                             H_total);
 
     // --- Grid Setup ---
@@ -181,6 +230,10 @@ int main() {
             eps_r[i][j] = eps_vac; // Default to vacuum
 
             if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
+                double x_coord_in_structure = (i - idx_x_struct_start) * h;
+                 // Ensure x_coord_in_structure is non-negative (should be by loop construction, but good for safety)
+                if (x_coord_in_structure < 0) x_coord_in_structure = 0;
+
                 // Bottom Silicon Layer
                 // Base
                 if (j >= 0 && j <= idx_y_bot_si_base_end) {
@@ -188,11 +241,9 @@ int main() {
                 }
                 // Teeth (on top of the base)
                 if (j > idx_y_bot_si_base_end && j <= idx_y_bot_si_teeth_end) {
-                    double x_coord_in_structure = (i - idx_x_struct_start) * h;
-                    // Ensure x_coord_in_structure is non-negative for fmod
-                    if (x_coord_in_structure < 0) x_coord_in_structure = 0; 
-                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
-                    if (pos_in_period < x_teeth_width) {
+                    if (is_in_varying_tooth(x_coord_in_structure, x_structure_len, 
+                                            initial_x_teeth_width_um, x_teeth_width_increment_um, 
+                                            x_teeth_spacing)) {
                         eps_r[i][j] = eps_si;
                     }
                 }
@@ -204,10 +255,9 @@ int main() {
                 }
                 // Teeth (hanging below the base)
                 if (j >= idx_y_top_si_teeth_start && j < idx_y_top_si_base_start) {
-                     double x_coord_in_structure = (i - idx_x_struct_start) * h;
-                     if (x_coord_in_structure < 0) x_coord_in_structure = 0;
-                     double pos_in_period = fmod(x_coord_in_structure, tooth_period);
-                     if (pos_in_period < x_teeth_width) {
+                     if (is_in_varying_tooth(x_coord_in_structure, x_structure_len, 
+                                             initial_x_teeth_width_um, x_teeth_width_increment_um, 
+                                             x_teeth_spacing)) {
                         eps_r[i][j] = eps_si;
                     }
                 }
