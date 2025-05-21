@@ -100,7 +100,7 @@ def plot_results():
     ax_V.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_V.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "potential_plot.png"))
+    plt.savefig(os.path.join(output_folder, "potential_plot.pdf"))
 
     # Plot 2: Electric Field Magnitude
     plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
@@ -119,7 +119,7 @@ def plot_results():
     ax_Emag.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_Emag.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "efield_magnitude_plot.png"))
+    plt.savefig(os.path.join(output_folder, "efield_magnitude_plot.pdf"))
 
     # Plot 3: Permittivity Map
     plt.figure(figsize=(8, 6)) # New figure for Permittivity
@@ -138,7 +138,7 @@ def plot_results():
     ax_eps.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
     ax_eps.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "permittivity_map_plot.png"))
+    plt.savefig(os.path.join(output_folder, "permittivity_map_plot.pdf"))
 
     # Plot 4: Electric Field Quiver Plot (Vacuum Only)
     plt.figure(figsize=(10, 7)) # New figure for E-field Quiver
@@ -195,7 +195,7 @@ def plot_results():
     ax_Evec.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'k--', lw=0.8)
     ax_Evec.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'k--', lw=0.8)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "efield_quiver_vacuum_plot.png")) # Renamed save file
+    plt.savefig(os.path.join(output_folder, "efield_quiver_vacuum_plot.pdf")) # Renamed save file
 
 
     plt.show() # Show all figures
