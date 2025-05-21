@@ -546,7 +546,7 @@ int main() {
     std::cout << "Proton initial y-distribution range (m) from epsilon_map: [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
     
     std::vector<Proton> protons(NUM_PROTONS);
-    std::mt19937 rng(std::random_device{});
+    std::mt19937 rng(std::random_device{}()); // Corrected initialization
     std::uniform_real_distribution<double> dist_y(vacuum_gap_start_y, vacuum_gap_end_y); 
 
 
