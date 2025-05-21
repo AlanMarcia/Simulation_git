@@ -55,10 +55,12 @@ def load_2d_csv(filename):
         return None
 
 def main():
-    input_base_folder = "geometria_Denti_sfasati_profondi"
-    trajectories_folder = os.path.join(input_base_folder, "proton_trajectories")
-    output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.pdf")
-    output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.pdf")
+    input_base_folder = "geometria_Denti_sfasati_profondi_10kV" # Base folder for input files
+
+    # trajectories_folder = os.path.join(input_base_folder, "proton_trajectories") # Removed
+    all_trajectories_file = os.path.join(input_base_folder, "all_proton_trajectories.csv") # New single file
+    output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.png") # Changed to .png
+    output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.png") # Changed to .png
 
     # geom_params_file = os.path.join(input_base_folder, "geometry_params.csv") # File still exists, but not used for plotting shapes
     eps_r_file = os.path.join(input_base_folder, "permittivity.csv")
@@ -99,27 +101,49 @@ def main():
     final_energies_eV = []
     successful_protons_count = 0
 
-    trajectory_files = glob.glob(os.path.join(trajectories_folder, "proton_*_trajectory.csv"))
+    # trajectory_files = glob.glob(os.path.join(trajectories_folder, "proton_*_trajectory.csv")) # Removed
     
-    if not trajectory_files:
-        print(f"No trajectory files found in {trajectories_folder}")
+    # Load the single trajectory file
+    try:
+        df_all_trajectories = pd.read_csv(all_trajectories_file)
+        if df_all_trajectories.empty:
+            print(f"Trajectory file {all_trajectories_file} is empty.")
+            df_all_trajectories = None # Set to None to skip plotting/analysis
+    except FileNotFoundError:
+        print(f"Trajectory file not found: {all_trajectories_file}")
+        df_all_trajectories = None
+    except Exception as e:
+        print(f"Error reading trajectory file {all_trajectories_file}: {e}")
+        df_all_trajectories = None
+
     
-    num_trajectories_to_plot = min(len(trajectory_files), 1000) 
     plotted_traj_legend_added = False
+    num_protons_in_file = 0
     
-    for i, traj_file in enumerate(trajectory_files):
-        # Process all files for energy histogram, plot only up to num_trajectories_to_plot
-        try:
-            # Trajectory data is in SI units (m, m/s)
-            df_traj = pd.read_csv(traj_file) 
+    if df_all_trajectories is not None:
+        grouped_trajectories = df_all_trajectories.groupby('proton_id')
+        proton_ids = list(grouped_trajectories.groups.keys())
+        num_protons_in_file = len(proton_ids)
+        
+        num_trajectories_to_plot = min(num_protons_in_file, 100)
+
+        # Plot a subset of trajectories
+        for i, proton_id in enumerate(proton_ids):
+            if i >= num_trajectories_to_plot:
+                break # Stop plotting if limit is reached
+            
+            df_traj = grouped_trajectories.get_group(proton_id)
             if not df_traj.empty:
-                if i < num_trajectories_to_plot: 
-                    # Convert m to µm for plotting
-                    line, = ax.plot(df_traj['x_m'] * 1e6, df_traj['y_m'] * 1e6, linestyle='-', linewidth=0.5, alpha=0.7, color='red')
-                    if not plotted_traj_legend_added:
-                        line.set_label('Proton Trajectories') # Add label to one line for the legend
-                        plotted_traj_legend_added = True
-                
+                # Convert m to µm for plotting
+                line, = ax.plot(df_traj['x_m'] * 1e6, df_traj['y_m'] * 1e6, linestyle='-', linewidth=0.5, alpha=0.7, color='red')
+                if not plotted_traj_legend_added:
+                    line.set_label('Proton Trajectories') # Add label to one line for the legend
+                    plotted_traj_legend_added = True
+        
+        # Process all trajectories for energy histogram
+        for proton_id in proton_ids:
+            df_traj = grouped_trajectories.get_group(proton_id)
+            if not df_traj.empty:
                 last_point = df_traj.iloc[-1]
                 # last_point['x_m'] is in meters. Compare with L_total_sim_um (converted to m)
                 if last_point['x_m'] >= (L_total_sim_um * 1e-6) - (grid_spacing_h_um * 1e-6 / 2.0) :
@@ -133,15 +157,14 @@ def main():
                     ke_joules = 0.5 * M_PROTON_KG * v_sq_mps
                     ke_eV = ke_joules / E_CHARGE_C
                     final_energies_eV.append(ke_eV)
-                    
-        except pd.errors.EmptyDataError:
-            print(f"Warning: Trajectory file {traj_file} is empty.")
-        except Exception as e:
-            print(f"Error reading or plotting trajectory file {traj_file}: {e}")
+    else:
+        print(f"No trajectory data loaded from {all_trajectories_file}. Skipping trajectory plotting and energy analysis.")
+        num_trajectories_to_plot = 0
+
 
     ax.set_xlabel("X (µm)") # Axis labels remain in µm for visualization
     ax.set_ylabel("Y (µm)") # Axis labels remain in µm for visualization
-    ax.set_title(f"Proton Trajectories ({min(len(trajectory_files), num_trajectories_to_plot)} shown, plotted in µm)")
+    ax.set_title(f"Proton Trajectories ({num_trajectories_to_plot} of {num_protons_in_file} shown, plotted in µm)")
     
     # Set plot limits based on the simulation domain (in µm)
     ax.set_xlim(0, L_total_sim_um)
@@ -156,7 +179,7 @@ def main():
         if traj_handle:
             custom_handles.append(traj_handle)
     
-    ax.legend(handles=custom_handles, loc='upper right')
+   # ax.legend(handles=custom_handles, loc='upper right')
     ax.set_aspect('equal', adjustable='box') # Important for correct geometric representation
     plt.grid(True, linestyle=':', alpha=0.7)
     
@@ -173,14 +196,29 @@ def main():
     if final_energies_eV:
         print(f"Number of protons considered successful for energy histogram: {successful_protons_count}")
         fig_hist, ax_hist = plt.subplots(figsize=(10, 6))
-        ax_hist.hist(final_energies_eV, bins=50, edgecolor='black', alpha=0.75)
+        ax_hist.hist(final_energies_eV, bins=50, edgecolor='black', alpha=0.75, color='mediumseagreen') # Added color for consistency
         ax_hist.set_xlabel("Final Kinetic Energy (eV)")
         ax_hist.set_ylabel("Number of Protons")
         ax_hist.set_title("Histogram of Final Kinetic Energies of Successful Protons")
         ax_hist.grid(True, linestyle=':', alpha=0.7)
+
+        # Calculate and display statistics
+        mean_ke = np.mean(final_energies_eV)
+        std_ke = np.std(final_energies_eV)
+        min_ke = np.min(final_energies_eV)
+        max_ke = np.max(final_energies_eV)
+        num_protons = len(final_energies_eV)
+        Efficiency = successful_protons_count / num_protons_in_file if num_protons_in_file > 0 else 0
+        stats_text_ke = f'Mean: {mean_ke:.2f} eV\nStd Dev: {std_ke:.2f} eV\nMin: {min_ke:.2f} eV\nMax: {max_ke:.2f} eV \nCount: {num_protons} Efficiency: {Efficiency:.2%}'
         
+        # Position the text box in the upper right corner of the plot
+        ax_hist.text(0.95, 0.95, stats_text_ke, transform=ax_hist.transAxes, fontsize=9,
+                     verticalalignment='top', horizontalalignment='right',
+                     bbox=dict(boxstyle='round,pad=0.5', fc='wheat', alpha=0.5))
+        
+        plt.tight_layout() # Adjust layout to prevent text box from being clipped
         try:
-            plt.savefig(output_hist_plot_file, dpi=300) # Corrected to savefig, adjusted dpi
+            plt.savefig(output_hist_plot_file, dpi=300) 
             print(f"Energy histogram saved to {output_hist_plot_file}")
         except Exception as e:
             print(f"Error saving energy histogram: {e}")

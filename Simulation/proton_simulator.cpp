@@ -439,7 +439,7 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
 int main() {
     std::cout << std::fixed << std::setprecision(6);
 
-    const std::string input_base_folder = "geometria_piana";
+    const std::string input_base_folder = "geometria_Denti_sfasati_profondi_10kV"; // Input folder
     // const std::string output_traj_folder = input_base_folder + "/proton_trajectories"; // Removed
     // create_directory_if_not_exists(output_traj_folder); // Removed
 
@@ -510,14 +510,8 @@ int main() {
      }
 
 
-    double initial_x_position_m;
-    if (geom.x_fs > 1e-9) {
-        initial_x_position_m = geom.x_fs + 1.0e-6; 
-    } else {
-        initial_x_position_m = L_total_sim * 0.05; 
-        std::cout << "Warning: x_free_space from CSV is zero or not loaded. Using fallback initial x position: " << initial_x_position_m * 1e6 << " um." << std::endl;
-    }
-    std::cout << "Protons will start at x = " << initial_x_position_m * 1e6 << " um." << std::endl;
+    double initial_x_position_m=5e-6;
+    
 
 
     std::vector<std::vector<double>> Ex_field, Ey_field; 
@@ -531,18 +525,28 @@ int main() {
     }
     std::cout << "Data loaded successfully. Nx=" << Nx << ", Ny=" << Ny << std::endl;
     
+    // Determine the x-range to search for the vacuum channel based on geometry parameters
+    // This range should ideally cover the main structural part to find the "inner gap".
     double x_search_start_for_gap = geom.x_fs;
     double x_search_end_for_gap = geom.x_fs + geom.x_sl;
 
-    if (geom.x_fs <= 1e-9 || geom.x_sl <= 1e-9) { 
-        std::cout << "Warning: x_fs or x_sl from CSV is zero/not loaded. Analyzing central 80% of x-domain for vacuum gap." << std::endl;
+    if (geom.x_fs <= 1e-9 || geom.x_sl <= 1e-9 || x_search_start_for_gap < 0 || x_search_end_for_gap <= x_search_start_for_gap || x_search_end_for_gap > L_total_sim ) { 
+        std::cout << "Warning: x_fs or x_sl from CSV is zero, not loaded, or defines an invalid/out-of-bounds range." << std::endl;
+        std::cout << "Analyzing central 80% of x-domain for vacuum gap instead." << std::endl;
         x_search_start_for_gap = L_total_sim * 0.1;
         x_search_end_for_gap = L_total_sim * 0.9;
+        // Ensure this fallback range is valid
+        if (x_search_start_for_gap >= x_search_end_for_gap) {
+            x_search_start_for_gap = 0.0;
+            x_search_end_for_gap = L_total_sim;
+        }
     }
+    
+    std::cout << "Searching for vacuum channel for proton initialization by analyzing x-range: [" 
+              << x_search_start_for_gap * 1e6 << ", " << x_search_end_for_gap * 1e6 << "] um." << std::endl;
     
     double h_coords_for_vacuum_find = (h_from_coords_y > 1e-9) ? h_from_coords_y : h_from_coords_x;
     if (h_coords_for_vacuum_find <= 1e-9) h_coords_for_vacuum_find = h_for_simulation; // Last resort
-
 
     std::pair<double, double> vacuum_channel = find_vacuum_channel_from_map(
         eps_r_map_data, x_coords, y_coords, h_coords_for_vacuum_find,
@@ -559,7 +563,7 @@ int main() {
     
     std::vector<Proton> protons(NUM_PROTONS);
     std::mt19937 rng(std::random_device{}()); // Corrected initialization
-    std::uniform_real_distribution<double> dist_y(vacuum_gap_start_y, vacuum_gap_end_y); 
+    std::uniform_real_distribution<double> dist_y(20e-6,30e-6 ); 
 
 
     for (int i = 0; i < NUM_PROTONS; ++i) {

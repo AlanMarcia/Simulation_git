@@ -185,10 +185,10 @@ int main() {
 
     // Boundary conditions
     const double V_left = 0.0;  // Volts
-    const double V_right = -1000.0; // Volts
+    const double V_right = -10000.0; // Volts
 
     // Create output folder
-    const std::string output_folder = "geometria_Denti_sfasati_profondi";
+    const std::string output_folder = "geometria_Denti_sfasati_profondi_10kV";
 
     // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;
