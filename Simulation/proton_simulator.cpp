@@ -36,10 +36,11 @@ const double OUTPUT_TIME_INTERVAL_S = 1e-10; // Interval for writing trajectory 
 
 // --- Structures ---
 struct Proton {
+    int id;          // Unique identifier for the proton
     double x, y;     // Position in meters (SI)
     double vx, vy;   // Velocity in m/s (SI)
     bool active;
-    std::ofstream trajectory_file;
+    // std::ofstream trajectory_file; // Removed: Will be handled locally
 };
 
 struct GeometryParameters {
@@ -439,8 +440,19 @@ int main() {
     std::cout << std::fixed << std::setprecision(6);
 
     const std::string input_base_folder = "geometria_piana";
-    const std::string output_traj_folder = input_base_folder + "/proton_trajectories";
-    create_directory_if_not_exists(output_traj_folder);
+    // const std::string output_traj_folder = input_base_folder + "/proton_trajectories"; // Removed
+    // create_directory_if_not_exists(output_traj_folder); // Removed
+
+    const std::string all_trajectories_filename = input_base_folder + "/all_proton_trajectories.csv";
+    std::ofstream all_trajectories_file_stream;
+    all_trajectories_file_stream.open(all_trajectories_filename, std::ios::out);
+    if (!all_trajectories_file_stream.is_open()) {
+        std::cerr << "Error: Could not open the consolidated trajectory file: " << all_trajectories_filename << ". Exiting." << std::endl;
+        return 1;
+    }
+    all_trajectories_file_stream << std::scientific << std::setprecision(8);
+    all_trajectories_file_stream << "proton_id,time_s,x_m,y_m,vx_m_per_s,vy_m_per_s\n";
+
 
     GeometryParameters geom;
     if (!load_geometry_params(input_base_folder + "/geometry_params.csv", geom)) {
@@ -551,22 +563,15 @@ int main() {
 
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
+        protons[i].id = i; // Assign ID
         protons[i].x = initial_x_position_m; 
         protons[i].y = dist_y(rng); // y in meters
         protons[i].vx = 0.0; // Initial velocity in m/s
         protons[i].vy = 0.0; // Initial velocity in m/s
         protons[i].active = true;
 
-        std::string traj_filename = output_traj_folder + "/proton_" + std::to_string(i) + "_trajectory.csv";
-        protons[i].trajectory_file.open(traj_filename);
-        if (!protons[i].trajectory_file.is_open()) {
-            std::cerr << "Error: Could not open trajectory file " << traj_filename << std::endl;
-            protons[i].active = false; // Cannot save, so don't simulate
-            continue;
-        }
-        protons[i].trajectory_file << std::scientific << std::setprecision(8); // Use scientific for SI potentially small/large numbers
-        protons[i].trajectory_file << "time_s,x_m,y_m,vx_m_per_s,vy_m_per_s\n";
-        protons[i].trajectory_file << 0.0 << "," << protons[i].x << "," << protons[i].y << "," << protons[i].vx << "," << protons[i].vy << "\n";
+        // Write initial state to the single file
+        all_trajectories_file_stream << protons[i].id << "," << 0.0 << "," << protons[i].x << "," << protons[i].y << "," << protons[i].vx << "," << protons[i].vy << "\n";
     }
 
     double current_time = 0.0;
@@ -584,10 +589,14 @@ int main() {
             break;
         }
 
+        bool needs_output_this_step = ((step + 1) % output_every_n_steps == 0);
+
         for (int i = 0; i < NUM_PROTONS; ++i) {
             if (!protons[i].active) continue;
 
             Proton& p = protons[i];
+            // std::string traj_filename_for_proton = output_traj_folder + "/proton_" + std::to_string(i) + "_trajectory.csv"; // Removed
+            // std::ofstream traj_file_stream_loop; // Removed
 
             // RK4 step
             std::pair<double, double> a1, a2, a3, a4;
@@ -629,53 +638,45 @@ int main() {
             p.vx += (k1vx + 2.0*k2vx + 2.0*k3vx + k4vx) / 6.0;
             p.vy += (k1vy + 2.0*k2vy + 2.0*k3vy + k4vy) / 6.0;
 
+            // bool became_inactive_this_substep = false; // Not strictly needed anymore for file closing logic
+
             // Check if proton reached the end successfully
             if (p.x >= L_total_sim) { // L_total_sim is in meters
                 protons_reached_end_successfully++;
                 p.active = false;
                 active_protons_count--;
-                if (p.trajectory_file.is_open()) {
-                    // Write final position before closing if it hit material/boundary
-                    p.trajectory_file << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
-                    p.trajectory_file.close();
-                }
+                // became_inactive_this_substep = true; // Not strictly needed
+                // Write final position to the single file
+                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
                 continue; 
             }
 
             // Check if proton hit material or went out of other bounds (all checks in meters)
             if (is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
                 p.active = false;
-                if (p.trajectory_file.is_open()) {
-                    p.trajectory_file.close();
-                }
                 active_protons_count--;
+                // became_inactive_this_substep = true; // Not strictly needed
+                 // Write final position before deactivating due to collision/OOB to the single file
+                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+            }
+
+            // Regular output if still active and it's an output step
+            if (p.active && needs_output_this_step) {
+                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
             }
         }
 
         current_time += TIME_STEP_S;
-
-        if ((step + 1) % output_every_n_steps == 0) {
-            for (int i = 0; i < NUM_PROTONS; ++i) {
-                if (protons[i].active) {
-                    Proton& p = protons[i];
-                    // Output data in SI units (meters, m/s)
-                    p.trajectory_file << current_time << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
-                }
-            }
-        }
         
-        if ((step + 1) % std::max(1, num_steps / 100) == 0 || step == num_steps -1 ) { // Print progress roughly every 1%
+        // Progress reporting remains the same
+        if ((step + 1) % std::max(1, num_steps / 100) == 0 || step == num_steps -1 ) { 
              double progress = static_cast<double>(step + 1) / num_steps * 100.0;
              std::cout << "\rSimulation progress: " << std::fixed << std::setprecision(2) << progress << "% (" << active_protons_count << " active protons)" << std::flush;
         }
     }
     std::cout << "\nSimulation finished." << std::endl;
 
-    for (int i = 0; i < NUM_PROTONS; ++i) {
-        if (protons[i].trajectory_file.is_open()) {
-            protons[i].trajectory_file.close();
-        }
-    }
+    all_trajectories_file_stream.close(); // Close the single trajectory file
 
     double success_percentage = 0.0;
     if (NUM_PROTONS > 0) {
@@ -684,7 +685,7 @@ int main() {
     std::cout << protons_reached_end_successfully << " out of " << NUM_PROTONS << " protons reached the end successfully." << std::endl;
     std::cout << "Success percentage: " << std::fixed << std::setprecision(2) << success_percentage << "%" << std::endl;
 
-    std::cout << "Proton trajectories saved to '" << output_traj_folder << "' (data in SI units)." << std::endl;
+    std::cout << "All proton trajectories saved to '" << all_trajectories_filename << "' (data in SI units)." << std::endl;
     return 0;
 }
 
