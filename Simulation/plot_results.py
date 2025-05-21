@@ -140,6 +140,64 @@ def plot_results():
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, "permittivity_map_plot.png"))
 
+    # Plot 4: Electric Field Quiver Plot (Vacuum Only)
+    plt.figure(figsize=(10, 7)) # New figure for E-field Quiver
+    ax_Evec = plt.gca()
+    
+    # Downsample for quiver plot to avoid overcrowding
+    skip_rate = 5 # Adjust skip rate as needed
+    # Ensure skip rate is not too large for the number of points, especially in y
+    if y_coords.shape[0] // skip_rate < 2 : # Ensure at least 2 points in y after skipping if possible
+        skip_rate_y = max(1, y_coords.shape[0] // 2 if y_coords.shape[0] > 1 else 1)
+    else:
+        skip_rate_y = skip_rate
+    if x_coords.shape[0] // skip_rate < 2 :
+        skip_rate_x = max(1, x_coords.shape[0] // 2 if x_coords.shape[0] > 1 else 1)
+    else:
+        skip_rate_x = skip_rate
+
+    skip = (slice(None, None, skip_rate_y), slice(None, None, skip_rate_x))
+    
+    X, Y = np.meshgrid(x_coords, y_coords) # Meshgrid for quiver
+
+    # Prepare data for quiver: Ex.T, Ey.T, E_mag.T have shape (Ny, Nx)
+    Ex_quiver = Ex.T.copy()
+    Ey_quiver = Ey.T.copy()
+    Emag_quiver = E_mag.T.copy()
+
+    # Create a mask for points outside the vacuum gap
+    # Vacuum gap is y_si_bot_end < y < y_vac_end
+    # Mask rows in y_coords that are <= y_si_bot_end or >= y_vac_end
+    mask_y_outside_vacuum = (y_coords <= y_si_bot_end) | (y_coords >= y_vac_end)
+
+    # Apply mask: set values outside vacuum to NaN so they are not plotted
+    Ex_quiver[mask_y_outside_vacuum, :] = np.nan
+    Ey_quiver[mask_y_outside_vacuum, :] = np.nan
+    Emag_quiver[mask_y_outside_vacuum, :] = np.nan
+    
+    # Plot quiver using the masked and skipped data
+    # Only plot if there are non-NaN values to avoid errors with all-NaN slices
+    if not np.all(np.isnan(Ex_quiver[skip])):
+        ax_Evec.quiver(X[skip], Y[skip], 
+                       Ex_quiver[skip], Ey_quiver[skip], Emag_quiver[skip], 
+                       cmap='viridis', scale=None, scale_units='xy', angles='xy', 
+                       headwidth=3, headlength=5, pivot='middle')
+    
+    ax_Evec.set_title('Electric Field Vectors in Vacuum (Quiver Plot)')
+    ax_Evec.set_xlabel('x (µm)')
+    ax_Evec.set_ylabel('y (µm)')
+    ax_Evec.set_aspect('equal', adjustable='box')
+    # Add structure outlines
+    ax_Evec.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'k--', lw=0.8)
+    ax_Evec.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'k--', lw=0.8)
+    ax_Evec.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'k--', lw=0.8)
+    ax_Evec.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'k--', lw=0.8)
+    ax_Evec.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'k--', lw=0.8)
+    ax_Evec.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'k--', lw=0.8)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_folder, "efield_quiver_vacuum_plot.png")) # Renamed save file
+
+
     plt.show() # Show all figures
 
 if __name__ == '__main__':

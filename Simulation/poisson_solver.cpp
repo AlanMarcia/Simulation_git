@@ -6,7 +6,19 @@
 #include <string>
 #include <algorithm> // For std::min, std::max
 #include <omp.h>     // For OpenMP
-#include <filesystem> // For creating directories
+
+#if defined(_WIN32)
+    #include <direct.h> // For _mkdir
+    #define MKDIR(path) _mkdir(path)
+    #define STAT_STRUCT _stat
+    #define STAT_FUNC _stat
+#else
+    #include <sys/stat.h> // For mkdir and stat
+    #include <sys/types.h> // For mode_t
+    #define MKDIR(path) mkdir(path, 0755) // 0755 permissions
+    #define STAT_STRUCT stat
+    #define STAT_FUNC stat
+#endif
 
 // Helper function to save a 2D vector to a CSV file
 void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
@@ -77,8 +89,8 @@ int main() {
 
     // SOR parameters
     const double omega = 1.8; // Relaxation factor
-    const double tolerance = 1e-5; // Convergence tolerance
-    const int max_iterations = 50000;
+    const double tolerance = 1e-4; // Convergence tolerance
+    const int max_iterations = 500000;
 
     // Material properties (relative permittivity)
     const double eps_si = 11.7;
@@ -90,7 +102,28 @@ int main() {
 
     // Create output folder
     const std::string output_folder = "geometria_piana";
-    std::filesystem::create_directory(output_folder);
+
+    // Attempt to create the output directory if it doesn't exist
+    struct STAT_STRUCT info;
+    if (STAT_FUNC(output_folder.c_str(), &info) != 0) { // Check if directory exists
+        if (MKDIR(output_folder.c_str()) == 0) {
+            std::cout << "Output directory '" << output_folder << "' created." << std::endl;
+        } else {
+            std::cerr << "Error: Could not create output directory '" << output_folder << "'. Please create it manually." << std::endl;
+            // Optionally, exit if directory creation is critical and failed
+            // return 1; 
+        }
+    } else if (!(info.st_mode & S_IFDIR)) { // Check if it's a directory
+        std::cerr << "Error: '" << output_folder << "' exists but is not a directory. Please remove it or rename it." << std::endl;
+        // Optionally, exit
+        // return 1;
+    } else {
+        std::cout << "Output directory '" << output_folder << "' already exists." << std::endl;
+    }
+    // The following line requires C++17 (or later) and the <filesystem> header.
+    // It was commented out to resolve compilation errors if not using a C++17 compliant compiler/flags.
+    // An alternative pre-C++17 directory creation attempt has been added above.
+    // std::filesystem::create_directory(output_folder);
 
     // Save geometry parameters before extensive calculations
     saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
