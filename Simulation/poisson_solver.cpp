@@ -55,7 +55,9 @@ void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& 
 void saveGeometryParamsToCSV(const std::string& filename,
                              double h_val,
                              double x_fs, double x_sl,
-                             double y_slt, double y_vgt,
+                             double y_sibh, double y_th, // y_si_base_height, y_teeth_height
+                             double y_vgt,
+                             double x_tw, double x_ts,   // x_teeth_width, x_teeth_spacing
                              double H_tot) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
@@ -66,8 +68,11 @@ void saveGeometryParamsToCSV(const std::string& filename,
     outfile << "h," << h_val << std::endl;
     outfile << "x_free_space," << x_fs << std::endl;
     outfile << "x_structure_len," << x_sl << std::endl;
-    outfile << "y_si_layer_thick," << y_slt << std::endl;
+    outfile << "y_si_base_height," << y_sibh << std::endl;
+    outfile << "y_teeth_height," << y_th << std::endl;
     outfile << "y_vacuum_gap_thick," << y_vgt << std::endl;
+    outfile << "x_teeth_width," << x_tw << std::endl;
+    outfile << "x_teeth_spacing," << x_ts << std::endl;
     outfile << "H_total," << H_tot << std::endl;
     outfile.close();
     std::cout << "Geometry parameters saved to " << filename << std::endl;
@@ -80,12 +85,21 @@ int main() {
 
     // Dimensions in µm
     const double L_total = 320.0;
+    // H_total = 2 * (y_si_base_height + y_teeth_height) + y_vacuum_gap_thick
+    // H_total = 2 * (5.0 + 5.0) + 10.0 = 2 * 10.0 + 10.0 = 20.0 + 10.0 = 30.0
     const double H_total = 30.0;
 
     const double x_free_space = 10.0;
     const double x_structure_len = 300.0;
-    const double y_si_layer_thick = 10.0;
-    const double y_vacuum_gap_thick = 10.0;
+    
+    // New geometry parameters for silicon layers
+    const double y_si_base_height = 5.0;   // µm
+    const double y_teeth_height = 5.0;     // µm
+    const double x_teeth_width = 10.0;     // µm
+    const double x_teeth_spacing = 10.0;   // µm
+    const double tooth_period = x_teeth_width + x_teeth_spacing;
+
+    const double y_vacuum_gap_thick = 10.0; // µm
 
     // SOR parameters
     const double omega = 1.8; // Relaxation factor
@@ -101,7 +115,7 @@ int main() {
     const double V_right = -1000.0; // Volts
 
     // Create output folder
-    const std::string output_folder = "geometria_piana";
+    const std::string output_folder = "geometria_Denti_uguali";
 
     // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;
@@ -129,7 +143,9 @@ int main() {
     saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
                             h, 
                             x_free_space, x_structure_len, 
-                            y_si_layer_thick, y_vacuum_gap_thick, 
+                            y_si_base_height, y_teeth_height, 
+                            y_vacuum_gap_thick,
+                            x_teeth_width, x_teeth_spacing,
                             H_total);
 
     // --- Grid Setup ---
@@ -149,48 +165,78 @@ int main() {
     const int idx_x_struct_start = static_cast<int>(x_free_space / h);
     const int idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len) / h);
 
-    const int idx_y_si_bot_end = static_cast<int>(y_si_layer_thick / h);
-    const int idx_y_vac_start = idx_y_si_bot_end + 1; // Not strictly needed for assignment if default is vac
-    const int idx_y_vac_end = static_cast<int>((y_si_layer_thick + y_vacuum_gap_thick) / h);
-    const int idx_y_si_top_start = idx_y_vac_end; // Note: if h=1, vac_end is 20, si_top_start is 20.
+    // Y-indices for the layers
+    const int idx_y_bot_si_base_end = static_cast<int>(y_si_base_height / h);
+    const int idx_y_bot_si_teeth_end = static_cast<int>((y_si_base_height + y_teeth_height) / h);
+    
+    const int idx_y_vac_end = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick) / h);
+    // This is where the top Si structure (teeth pointing down) begins.
+    
+    const int idx_y_top_si_teeth_start = idx_y_vac_end; // Start of top Si teeth (bottom edge of top Si structure)
+    const int idx_y_top_si_base_start = static_cast<int>((y_si_base_height + y_teeth_height + y_vacuum_gap_thick + y_teeth_height) / h);
+    // The top Si base goes up to Ny-1
 
-    for (int i = idx_x_struct_start; i <= idx_x_struct_end; ++i) {
-        // Bottom Silicon layer
-        for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-            eps_r[i][j] = eps_si;
-        }
-        // Top Silicon layer
-        for (int j = idx_y_si_top_start; j < Ny; ++j) {
-            eps_r[i][j] = eps_si;
+    for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+            eps_r[i][j] = eps_vac; // Default to vacuum
+
+            if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
+                // Bottom Silicon Layer
+                // Base
+                if (j >= 0 && j <= idx_y_bot_si_base_end) {
+                    eps_r[i][j] = eps_si;
+                }
+                // Teeth (on top of the base)
+                if (j > idx_y_bot_si_base_end && j <= idx_y_bot_si_teeth_end) {
+                    double x_coord_in_structure = (i - idx_x_struct_start) * h;
+                    // Ensure x_coord_in_structure is non-negative for fmod
+                    if (x_coord_in_structure < 0) x_coord_in_structure = 0; 
+                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
+                    if (pos_in_period < x_teeth_width) {
+                        eps_r[i][j] = eps_si;
+                    }
+                }
+
+                // Top Silicon Layer
+                // Base (topmost part)
+                if (j >= idx_y_top_si_base_start && j < Ny) {
+                    eps_r[i][j] = eps_si;
+                }
+                // Teeth (hanging below the base)
+                if (j >= idx_y_top_si_teeth_start && j < idx_y_top_si_base_start) {
+                     double x_coord_in_structure = (i - idx_x_struct_start) * h;
+                     if (x_coord_in_structure < 0) x_coord_in_structure = 0;
+                     double pos_in_period = fmod(x_coord_in_structure, tooth_period);
+                     if (pos_in_period < x_teeth_width) {
+                        eps_r[i][j] = eps_si;
+                    }
+                }
+            }
         }
     }
     
     std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << std::endl;
     std::cout << "Structure x-indices: " << idx_x_struct_start << " to " << idx_x_struct_end << std::endl;
-    std::cout << "Bottom Si y-indices: 0 to " << idx_y_si_bot_end << std::endl;
-    std::cout << "Vacuum y-indices (approx): " << idx_y_si_bot_end + 1 << " to " << idx_y_si_top_start -1 << std::endl;
-    std::cout << "Top Si y-indices: " << idx_y_si_top_start << " to " << Ny - 1 << std::endl;
+    std::cout << "Bottom Si base y-indices: 0 to " << idx_y_bot_si_base_end << std::endl;
+    std::cout << "Bottom Si teeth y-indices: " << idx_y_bot_si_base_end + 1 << " to " << idx_y_bot_si_teeth_end << std::endl;
+    std::cout << "Vacuum gap y-indices (approx): " << idx_y_bot_si_teeth_end + 1 << " to " << idx_y_top_si_teeth_start -1 << std::endl;
+    std::cout << "Top Si teeth y-indices: " << idx_y_top_si_teeth_start << " to " << idx_y_top_si_base_start - 1 << std::endl;
+    std::cout << "Top Si base y-indices: " << idx_y_top_si_base_start << " to " << Ny - 1 << std::endl;
 
 
     // --- Boundary Conditions ---
-    // Left side of Silicon layers (0V)
-    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-        V[idx_x_struct_start][j] = V_left;
-        fixed_potential_mask[idx_x_struct_start][j] = true;
-    }
-    for (int j = idx_y_si_top_start; j < Ny; ++j) {
-        V[idx_x_struct_start][j] = V_left;
-        fixed_potential_mask[idx_x_struct_start][j] = true;
-    }
-
-    // Right side of Silicon layers (-1kV)
-    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-        V[idx_x_struct_end][j] = V_right;
-        fixed_potential_mask[idx_x_struct_end][j] = true;
-    }
-    for (int j = idx_y_si_top_start; j < Ny; ++j) {
-        V[idx_x_struct_end][j] = V_right;
-        fixed_potential_mask[idx_x_struct_end][j] = true;
+    // Apply to all parts of the silicon structure at the left and right ends of the defined structure length
+    for (int j = 0; j < Ny; ++j) {
+        // Check if the point (idx_x_struct_start, j) is silicon
+        if (eps_r[idx_x_struct_start][j] == eps_si) {
+            V[idx_x_struct_start][j] = V_left;
+            fixed_potential_mask[idx_x_struct_start][j] = true;
+        }
+        // Check if the point (idx_x_struct_end, j) is silicon
+        if (eps_r[idx_x_struct_end][j] == eps_si) {
+            V[idx_x_struct_end][j] = V_right;
+            fixed_potential_mask[idx_x_struct_end][j] = true;
+        }
     }
 
     // --- SOR Iteration ---

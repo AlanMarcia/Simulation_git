@@ -27,15 +27,19 @@ def load_geometry_params(filename):
         for row in reader:
             if len(row) == 2:
                 params[row[0]] = float(row[1])
-    required_keys = ["h", "x_free_space", "x_structure_len", "y_si_layer_thick", "y_vacuum_gap_thick", "H_total"]
+    required_keys = ["h", "x_free_space", "x_structure_len", 
+                     "y_si_base_height", "y_teeth_height", 
+                     "y_vacuum_gap_thick", "x_teeth_width", 
+                     "x_teeth_spacing", "H_total"]
     if not all(key in params for key in required_keys):
         print(f"Error: Missing one or more required keys in {filename}. Required: {required_keys}")
+        print(f"Found keys: {list(params.keys())}")
         return None
     return params
 
 def plot_results():
     # Create output folder
-    output_folder = "geometria_piana"
+    output_folder = "geometria_Denti_uguali"
     os.makedirs(output_folder, exist_ok=True)
 
     # File paths
@@ -68,18 +72,78 @@ def plot_results():
     E_mag = np.sqrt(Ex**2 + Ey**2)
 
     # Geometry for outlines from loaded parameters
-    # h_sim = geo_params["h"] # h from simulation, might be useful for other things
+    h_sim = geo_params["h"] 
     x_free_space = geo_params["x_free_space"]
     x_structure_len = geo_params["x_structure_len"]
-    y_si_layer_thick = geo_params["y_si_layer_thick"]
+    y_si_base_height = geo_params["y_si_base_height"]
+    y_teeth_height = geo_params["y_teeth_height"]
     y_vacuum_gap_thick = geo_params["y_vacuum_gap_thick"]
-    H_total_sim = geo_params["H_total"] # Total height from simulation
+    x_teeth_width = geo_params["x_teeth_width"]
+    x_teeth_spacing = geo_params["x_teeth_spacing"]
+    H_total_sim = geo_params["H_total"]
 
     x_struct_start = x_free_space
     x_struct_end = x_free_space + x_structure_len
-    y_si_bot_end = y_si_layer_thick
-    y_vac_end = y_si_layer_thick + y_vacuum_gap_thick # This is the top interface of the vacuum gap
-    y_si_top_start = y_si_layer_thick + y_vacuum_gap_thick # This is the bottom interface of the top Si layer
+    tooth_period = x_teeth_width + x_teeth_spacing
+
+    # Y-coordinates for structure boundaries
+    y_bot_si_base_top = y_si_base_height
+    y_bot_si_teeth_top = y_si_base_height + y_teeth_height
+
+    y_top_si_teeth_bottom = y_bot_si_teeth_top + y_vacuum_gap_thick
+    y_top_si_base_bottom = y_top_si_teeth_bottom + y_teeth_height
+    
+    def draw_detailed_outlines(ax, color_style):
+        # Bottom Silicon Structure
+        # Base
+        ax.plot([x_struct_start, x_struct_end], [0, 0], color_style, lw=0.8) # Bottom of base
+        ax.plot([x_struct_start, x_struct_end], [y_bot_si_base_top, y_bot_si_base_top], color_style, lw=0.8) # Top of base
+        ax.plot([x_struct_start, x_struct_start], [0, y_bot_si_base_top], color_style, lw=0.8) # Left of base
+        ax.plot([x_struct_end, x_struct_end], [0, y_bot_si_base_top], color_style, lw=0.8) # Right of base
+
+        # Teeth (Bottom)
+        current_x = x_struct_start
+        while current_x < x_struct_end:
+            tooth_x_start = current_x
+            tooth_x_end = min(current_x + x_teeth_width, x_struct_end)
+            
+            ax.plot([tooth_x_start, tooth_x_start], [y_bot_si_base_top, y_bot_si_teeth_top], color_style, lw=0.8) # Left side of tooth
+            if tooth_x_end <= x_struct_end : # Ensure we don't plot vertical line beyond structure if tooth is cut
+                 ax.plot([tooth_x_end, tooth_x_end], [y_bot_si_base_top, y_bot_si_teeth_top], color_style, lw=0.8) # Right side of tooth
+            ax.plot([tooth_x_start, tooth_x_end], [y_bot_si_teeth_top, y_bot_si_teeth_top], color_style, lw=0.8) # Top of tooth
+            
+            # Line connecting to next tooth (on top of base) - already drawn by base top line
+            current_x += tooth_period
+
+        # Top Silicon Structure
+        # Base
+        ax.plot([x_struct_start, x_struct_end], [y_top_si_base_bottom, y_top_si_base_bottom], color_style, lw=0.8) # Bottom of base
+        ax.plot([x_struct_start, x_struct_end], [H_total_sim, H_total_sim], color_style, lw=0.8) # Top of base
+        ax.plot([x_struct_start, x_struct_start], [y_top_si_base_bottom, H_total_sim], color_style, lw=0.8) # Left of base
+        ax.plot([x_struct_end, x_struct_end], [y_top_si_base_bottom, H_total_sim], color_style, lw=0.8) # Right of base
+
+        # Teeth (Top)
+        current_x = x_struct_start
+        while current_x < x_struct_end:
+            tooth_x_start = current_x
+            tooth_x_end = min(current_x + x_teeth_width, x_struct_end)
+
+            ax.plot([tooth_x_start, tooth_x_start], [y_top_si_teeth_bottom, y_top_si_base_bottom], color_style, lw=0.8) # Left side of tooth
+            if tooth_x_end <= x_struct_end:
+                ax.plot([tooth_x_end, tooth_x_end], [y_top_si_teeth_bottom, y_top_si_base_bottom], color_style, lw=0.8) # Right side of tooth
+            ax.plot([tooth_x_start, tooth_x_end], [y_top_si_teeth_bottom, y_top_si_teeth_bottom], color_style, lw=0.8) # Bottom of tooth
+            
+            current_x += tooth_period
+        
+        # Overall vertical boundaries of the structure region (if not covered by teeth sides)
+        # These connect the full height of the silicon parts at the start/end of the structure length
+        # For bottom structure:
+        ax.plot([x_struct_start, x_struct_start], [y_bot_si_base_top, y_bot_si_teeth_top if x_teeth_width > 0 else y_bot_si_base_top], color_style, lw=0.8)
+        ax.plot([x_struct_end, x_struct_end], [y_bot_si_base_top, y_bot_si_teeth_top if x_teeth_width > 0 else y_bot_si_base_top], color_style, lw=0.8)
+        # For top structure:
+        ax.plot([x_struct_start, x_struct_start], [y_top_si_teeth_bottom, y_top_si_base_bottom if x_teeth_width > 0 else y_top_si_teeth_bottom], color_style, lw=0.8)
+        ax.plot([x_struct_end, x_struct_end], [y_top_si_teeth_bottom, y_top_si_base_bottom if x_teeth_width > 0 else y_top_si_teeth_bottom], color_style, lw=0.8)
+
 
     # --- Plotting on separate canvases ---
 
@@ -92,13 +156,7 @@ def plot_results():
     ax_V.set_xlabel('x (µm)')
     ax_V.set_ylabel('y (µm)')
     ax_V.set_aspect('equal', adjustable='box')
-    # Add structure outlines
-    ax_V.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_V.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
+    draw_detailed_outlines(ax_V, 'w--')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, "potential_plot.pdf"))
 
@@ -111,32 +169,22 @@ def plot_results():
     ax_Emag.set_xlabel('x (µm)')
     ax_Emag.set_ylabel('y (µm)')
     ax_Emag.set_aspect('equal', adjustable='box')
-    # Add structure outlines
-    ax_Emag.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
+    draw_detailed_outlines(ax_Emag, 'w--')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, "efield_magnitude_plot.pdf"))
 
     # Plot 3: Permittivity Map
     plt.figure(figsize=(8, 6)) # New figure for Permittivity
     ax_eps = plt.gca()
-    contour_eps = ax_eps.contourf(x_coords, y_coords, eps_r.T, levels=10, cmap='coolwarm') # eps_r.T
+    # For permittivity, we don't need to draw outlines as the fill shows the geometry.
+    # If outlines are desired, use a contrasting color e.g. 'k--' or 'r--'
+    contour_eps = ax_eps.contourf(x_coords, y_coords, eps_r.T, levels=np.linspace(np.min(eps_r), np.max(eps_r), 5), cmap='coolwarm') # eps_r.T
     plt.colorbar(contour_eps, ax=ax_eps, label='Relative Permittivity (ε$_r$)')
     ax_eps.set_title('Relative Permittivity Map')
     ax_eps.set_xlabel('x (µm)')
     ax_eps.set_ylabel('y (µm)')
     ax_eps.set_aspect('equal', adjustable='box')
-    # Add structure outlines
-    ax_eps.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
+    # draw_detailed_outlines(ax_eps, 'k--') # Optional: outlines on permittivity plot
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, "permittivity_map_plot.pdf"))
 
@@ -166,14 +214,13 @@ def plot_results():
     Emag_quiver = E_mag.T.copy()
 
     # Create a mask for points outside the vacuum gap
-    # Vacuum gap is y_si_bot_end < y < y_vac_end
-    # Mask rows in y_coords that are <= y_si_bot_end or >= y_vac_end
-    mask_y_outside_vacuum = (y_coords <= y_si_bot_end) | (y_coords >= y_vac_end)
+    # Vacuum gap is y_bot_si_teeth_top < y < y_top_si_teeth_bottom
+    mask_y_outside_vacuum = (Y <= y_bot_si_teeth_top) | (Y >= y_top_si_teeth_bottom) # Y is meshgrid here
 
     # Apply mask: set values outside vacuum to NaN so they are not plotted
-    Ex_quiver[mask_y_outside_vacuum, :] = np.nan
-    Ey_quiver[mask_y_outside_vacuum, :] = np.nan
-    Emag_quiver[mask_y_outside_vacuum, :] = np.nan
+    Ex_quiver[mask_y_outside_vacuum] = np.nan
+    Ey_quiver[mask_y_outside_vacuum] = np.nan
+    Emag_quiver[mask_y_outside_vacuum] = np.nan
     
     # Plot quiver using the masked and skipped data
     # Only plot if there are non-NaN values to avoid errors with all-NaN slices
@@ -188,12 +235,7 @@ def plot_results():
     ax_Evec.set_ylabel('y (µm)')
     ax_Evec.set_aspect('equal', adjustable='box')
     # Add structure outlines
-    ax_Evec.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'k--', lw=0.8)
-    ax_Evec.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'k--', lw=0.8)
-    ax_Evec.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'k--', lw=0.8)
-    ax_Evec.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'k--', lw=0.8)
-    ax_Evec.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'k--', lw=0.8)
-    ax_Evec.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'k--', lw=0.8)
+    draw_detailed_outlines(ax_Evec, 'k--')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, "efield_quiver_vacuum_plot.pdf")) # Renamed save file
 
@@ -202,4 +244,4 @@ def plot_results():
 
 if __name__ == '__main__':
     plot_results()
-    print("Plotting finished. Plots saved to geometria_piana folder.")
+    print(f"Plotting finished. Plots saved to {output_folder} folder.")

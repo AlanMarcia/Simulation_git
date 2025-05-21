@@ -43,10 +43,10 @@ def load_coordinates(filepath):
         return None
 
 def main():
-    input_base_folder = "geometria_piana"
+    input_base_folder = "geometria_Denti_uguali"
     trajectories_folder = os.path.join(input_base_folder, "proton_trajectories")
-    output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.png")
-    output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.png")
+    output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.pdf")
+    output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.pdf")
 
     geom_params_file = os.path.join(input_base_folder, "geometry_params.csv")
     x_coords_file = os.path.join(input_base_folder, "x_coordinates.csv")
@@ -69,18 +69,69 @@ def main():
     # Plot geometry boundaries (using µm values directly)
     x_fs_um = geom.get('x_free_space', 0)
     x_sl_um = geom.get('x_structure_len', 0)
-    y_slt_um = geom.get('y_si_layer_thick', 0)
-    y_vgt_um = geom.get('y_vacuum_gap_thick', 0)
     
-    # Bottom Silicon Layer
-    ax.add_patch(patches.Rectangle((x_fs_um, 0), x_sl_um, y_slt_um, facecolor='lightblue', edgecolor='blue', label='Bottom Si Layer'))
+    # New geometry parameters from geom (expected in µm)
+    y_si_base_height_um = geom.get('y_si_base_height', 0)
+    y_teeth_height_um = geom.get('y_teeth_height', 0)
+    x_teeth_width_um = geom.get('x_teeth_width', 0)
+    x_teeth_spacing_um = geom.get('x_teeth_spacing', 0)
+    y_vgt_um = geom.get('y_vacuum_gap_thick', 0) # vacuum gap thickness
     
-    H_structure_total_um = geom.get('H_total', H_total_sim_um) 
-    top_si_height_um = H_structure_total_um - (y_slt_um + y_vgt_um)
-    if top_si_height_um > 0:
-         ax.add_patch(patches.Rectangle((x_fs_um, y_slt_um + y_vgt_um), x_sl_um, top_si_height_um, facecolor='lightblue', edgecolor='blue', label='Top Si Layer'))
-    else:
-        print("Warning: Top Si layer has zero or negative height based on parameters.")
+    H_structure_total_um = geom.get('H_total', H_total_sim_um)
+    tooth_period_um = x_teeth_width_um + x_teeth_spacing_um
+
+    # Y-coordinates for structure boundaries
+    y_bot_si_base_top_um = y_si_base_height_um
+    y_bot_si_teeth_top_um = y_si_base_height_um + y_teeth_height_um
+
+    y_top_si_teeth_bottom_um = y_bot_si_teeth_top_um + y_vgt_um
+    y_top_si_base_bottom_um = y_top_si_teeth_bottom_um + y_teeth_height_um
+
+    # Plot Bottom Silicon Structure
+    # Base
+    ax.add_patch(patches.Rectangle((x_fs_um, 0), x_sl_um, y_si_base_height_um, 
+                                   facecolor='lightblue', edgecolor='blue', label='Bottom Si Base'))
+    # Teeth
+    if tooth_period_um > 0 and y_teeth_height_um > 0 and x_teeth_width_um > 0:
+        current_x_um = x_fs_um
+        while current_x_um < (x_fs_um + x_sl_um):
+            tooth_x_start_um = current_x_um
+            actual_tooth_width_um = min(x_teeth_width_um, (x_fs_um + x_sl_um) - tooth_x_start_um)
+            if actual_tooth_width_um > 1e-9: # Avoid drawing zero-width patches
+                ax.add_patch(patches.Rectangle((tooth_x_start_um, y_bot_si_base_top_um), 
+                                               actual_tooth_width_um, y_teeth_height_um,
+                                               facecolor='lightblue', edgecolor='blue'))
+            current_x_um += tooth_period_um
+
+    # Plot Top Silicon Structure
+    # Base
+    top_base_height_um = H_structure_total_um - y_top_si_base_bottom_um
+    if top_base_height_um > 1e-9: # Avoid drawing zero-height patches
+        ax.add_patch(patches.Rectangle((x_fs_um, y_top_si_base_bottom_um), x_sl_um, top_base_height_um,
+                                   facecolor='lightcoral', edgecolor='red', label='Top Si Base'))
+    # Teeth
+    if tooth_period_um > 0 and y_teeth_height_um > 0 and x_teeth_width_um > 0:
+        current_x_um = x_fs_um
+        while current_x_um < (x_fs_um + x_sl_um):
+            tooth_x_start_um = current_x_um
+            actual_tooth_width_um = min(x_teeth_width_um, (x_fs_um + x_sl_um) - tooth_x_start_um)
+            if actual_tooth_width_um > 1e-9: # Avoid drawing zero-width patches
+                ax.add_patch(patches.Rectangle((tooth_x_start_um, y_top_si_teeth_bottom_um),
+                                               actual_tooth_width_um, y_teeth_height_um,
+                                               facecolor='lightcoral', edgecolor='red'))
+            current_x_um += tooth_period_um
+    
+    # Create a single legend entry for Si layers if teeth are present
+    if y_teeth_height_um > 0:
+        # Remove individual base labels if we add a general one
+        handles, labels = ax.get_legend_handles_labels()
+        # Filter out specific base labels if you want a general "Si Layer"
+        # For simplicity, we can just add new proxy artists for a combined legend
+        bottom_si_proxy = patches.Patch(facecolor='lightblue', edgecolor='blue', label='Bottom Si Layer')
+        top_si_proxy = patches.Patch(facecolor='lightcoral', edgecolor='red', label='Top Si Layer')
+        # Check if there are any trajectories to keep their potential legend entries
+        existing_traj_handles = [h for h,l in zip(handles,labels) if 'Si Base' not in l] # Keep non-base labels
+        ax.legend(handles=existing_traj_handles + [bottom_si_proxy, top_si_proxy], loc='upper right')
 
     final_energies_eV = []
     successful_protons_count = 0
@@ -134,7 +185,7 @@ def main():
     plt.grid(True, linestyle=':', alpha=0.7)
     
     try:
-        plt.savefig(output_plot_file, dpi=300)
+        plt.savefig(output_plot_file, dpi=300) # Corrected to savefig, adjusted dpi
         print(f"Plot saved to {output_plot_file}")
     except Exception as e:
         print(f"Error saving plot: {e}")
@@ -153,7 +204,7 @@ def main():
         ax_hist.grid(True, linestyle=':', alpha=0.7)
         
         try:
-            plt.savefig(output_hist_plot_file, dpi=300)
+            plt.savefig(output_hist_plot_file, dpi=300) # Corrected to savefig, adjusted dpi
             print(f"Energy histogram saved to {output_hist_plot_file}")
         except Exception as e:
             print(f"Error saving energy histogram: {e}")

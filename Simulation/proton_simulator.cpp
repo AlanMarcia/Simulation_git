@@ -46,9 +46,15 @@ struct GeometryParameters {
     double h;         // Grid spacing in meters (SI)
     double x_fs;      // x_free_space in meters (SI)
     double x_sl;      // x_structure_len in meters (SI)
-    double y_slt;     // y_si_layer_thick in meters (SI)
+    // double y_slt;  // Replaced by base and teeth heights
     double y_vgt;     // y_vacuum_gap_thick in meters (SI)
     double H_tot_geom; // H_total (from geometry file) in meters (SI)
+
+    // New parameters for toothed geometry
+    double y_si_base_height; // y_si_base_height in meters (SI)
+    double y_teeth_height;   // y_teeth_height in meters (SI)
+    double x_teeth_width;    // x_teeth_width in meters (SI)
+    double x_teeth_spacing;  // x_teeth_spacing in meters (SI)
 };
 
 // --- Helper Functions ---
@@ -154,17 +160,37 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
         std::string key, value_str;
         std::getline(ss, key, ',');
         std::getline(ss, value_str, ',');
-        double value_um = std::stod(value_str); // Value from CSV is in µm
+        double value_um = 0.0;
+        try {
+            value_um = std::stod(value_str); // Value from CSV is in µm
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing value for key '" << key << "': " << value_str << " (" << e.what() << ")" << std::endl;
+            continue;
+        }
         double value_m = value_um * 1.0e-6;     // Convert to meters
 
         if (key == "h") geom.h = value_m;
         else if (key == "x_free_space") geom.x_fs = value_m;
         else if (key == "x_structure_len") geom.x_sl = value_m;
-        else if (key == "y_si_layer_thick") geom.y_slt = value_m;
+        // else if (key == "y_si_layer_thick") geom.y_slt = value_m; // Old parameter
         else if (key == "y_vacuum_gap_thick") geom.y_vgt = value_m;
         else if (key == "H_total") geom.H_tot_geom = value_m;
+        else if (key == "y_si_base_height") geom.y_si_base_height = value_m;
+        else if (key == "y_teeth_height") geom.y_teeth_height = value_m;
+        else if (key == "x_teeth_width") geom.x_teeth_width = value_m;
+        else if (key == "x_teeth_spacing") geom.x_teeth_spacing = value_m;
     }
     file.close();
+    // Basic validation of loaded parameters
+    if (geom.h <= 0 || geom.x_sl <= 0 || geom.y_vgt <= 0 || geom.H_tot_geom <= 0 ||
+        geom.y_si_base_height < 0 || geom.y_teeth_height < 0 || 
+        geom.x_teeth_width < 0 || geom.x_teeth_spacing < 0) {
+        std::cerr << "Warning: Some critical geometry parameters are zero, negative or not loaded." << std::endl;
+        // Could return false here if strict validation is needed
+    }
+    if (geom.x_teeth_width > 0 && geom.x_teeth_spacing < 0) { // Spacing can be 0 for continuous teeth
+         std::cerr << "Warning: x_teeth_width is positive but x_teeth_spacing is negative." << std::endl;
+    }
     return true;
 }
 
@@ -230,11 +256,52 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
     double x_struct_end = geom.x_fs + geom.x_sl;
 
     if (px >= x_struct_start && px <= x_struct_end) {
-        double y_si_bottom_layer_end = geom.y_slt;
-        double y_top_si_layer_start = geom.y_slt + geom.y_vgt;
+        // Bottom Silicon Layer
+        double y_bot_si_base_top = geom.y_si_base_height;
+        double y_bot_si_teeth_top = geom.y_si_base_height + geom.y_teeth_height;
 
-        if (py <= y_si_bottom_layer_end) return true; // In bottom Si
-        if (py >= y_top_si_layer_start) return true;  // In top Si
+        // Check bottom base
+        if (py >= 0.0 && py <= y_bot_si_base_top) return true;
+
+        // Check bottom teeth
+        if (geom.y_teeth_height > 0 && geom.x_teeth_width > 0) {
+            if (py > y_bot_si_base_top && py <= y_bot_si_teeth_top) {
+                double tooth_period = geom.x_teeth_width + geom.x_teeth_spacing;
+                if (tooth_period > 1e-12) { // Avoid division by zero if period is effectively zero
+                    double x_coord_in_structure = px - x_struct_start;
+                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
+                    if (pos_in_period < geom.x_teeth_width) {
+                        return true; // Inside a bottom tooth
+                    }
+                } else if (geom.x_teeth_width > 0) { // Continuous tooth if period is zero but width is not
+                     return true;
+                }
+            }
+        }
+
+
+        // Top Silicon Layer
+        double y_top_si_teeth_bottom = y_bot_si_teeth_top + geom.y_vgt;
+        double y_top_si_base_bottom = y_top_si_teeth_bottom + geom.y_teeth_height;
+
+        // Check top base
+        if (py >= y_top_si_base_bottom && py <= H_total_sim) return true;
+        
+        // Check top teeth
+        if (geom.y_teeth_height > 0 && geom.x_teeth_width > 0) {
+            if (py >= y_top_si_teeth_bottom && py < y_top_si_base_bottom) {
+                 double tooth_period = geom.x_teeth_width + geom.x_teeth_spacing;
+                 if (tooth_period > 1e-12) {
+                    double x_coord_in_structure = px - x_struct_start;
+                    double pos_in_period = fmod(x_coord_in_structure, tooth_period);
+                    if (pos_in_period < geom.x_teeth_width) {
+                        return true; // Inside a top tooth
+                    }
+                } else if (geom.x_teeth_width > 0) { // Continuous tooth
+                    return true;
+                }
+            }
+        }
     }
     return false; // In vacuum or free space outside structure
 }
@@ -243,7 +310,7 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
 int main() {
     std::cout << std::fixed << std::setprecision(6);
 
-    const std::string input_base_folder = "geometria_piana";
+    const std::string input_base_folder = "geometria_Denti_uguali";
     const std::string output_traj_folder = input_base_folder + "/proton_trajectories";
     create_directory_if_not_exists(output_traj_folder);
 
@@ -292,27 +359,34 @@ int main() {
 
     std::vector<Proton> protons(NUM_PROTONS);
     std::mt19937 rng(std::random_device{}());
-    // Ensure y-distribution is within the vacuum gap correctly defined by geometry (all in meters)
-    double vacuum_gap_start_y = geom.y_slt;
-    double vacuum_gap_end_y = geom.y_slt + geom.y_vgt;
+    // Ensure y-distribution is within the vacuum gap correctly defined by new geometry (all in meters)
+    double vacuum_gap_start_y = geom.y_si_base_height + geom.y_teeth_height;
+    double vacuum_gap_end_y = vacuum_gap_start_y + geom.y_vgt;
+
     if (vacuum_gap_start_y >= vacuum_gap_end_y) {
-        std::cerr << "Error: Vacuum gap has zero or negative thickness. Check y_slt and y_vgt (after conversion to meters)." << std::endl;
-        std::cerr << "y_slt (m): " << geom.y_slt << ", y_vgt (m): " << geom.y_vgt << std::endl;
+        std::cerr << "Error: Vacuum gap has zero or negative thickness based on new geometry parameters." << std::endl;
+        std::cerr << "y_si_base_height (m): " << geom.y_si_base_height 
+                  << ", y_teeth_height (m): " << geom.y_teeth_height 
+                  << ", y_vgt (m): " << geom.y_vgt << std::endl;
+        std::cerr << "Calculated vacuum_gap_start_y (m): " << vacuum_gap_start_y 
+                  << ", vacuum_gap_end_y (m): " << vacuum_gap_end_y << std::endl;
+
         // Fallback or safe default if parameters are problematic
         if (geom.H_tot_geom > 0.0) { // if H_total_geom is available and positive (in meters)
              vacuum_gap_start_y = geom.H_tot_geom / 3.0;
              vacuum_gap_end_y = geom.H_tot_geom * 2.0 / 3.0;
              std::cout << "Warning: Using fallback y-distribution for protons due to problematic gap params." << std::endl;
         } else { // Absolute fallback
-            vacuum_gap_start_y = 1.0;
-            vacuum_gap_end_y = 2.0;
+            vacuum_gap_start_y = H_total_sim / 3.0; // Use H_total_sim if geom.H_tot_geom is bad
+            vacuum_gap_end_y = H_total_sim * 2.0 / 3.0;
              std::cout << "Warning: Using ABSOLUTE fallback y-distribution for protons." << std::endl;
         }
-         if (vacuum_gap_start_y >= vacuum_gap_end_y) { // Final check on fallback
-            std::cerr << "Critical Error: Fallback y-distribution also invalid. Exiting." << std::endl;
+         if (vacuum_gap_start_y >= vacuum_gap_end_y || vacuum_gap_start_y < 0 || vacuum_gap_end_y > H_total_sim ) { // Final check on fallback
+            std::cerr << "Critical Error: Fallback y-distribution also invalid or out of bounds. Exiting." << std::endl;
             return 1;
          }
     }
+    std::cout << "Proton initial y-distribution range (m): [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
     std::uniform_real_distribution<double> dist_y(vacuum_gap_start_y, vacuum_gap_end_y); // Range in meters
 
 
