@@ -1,0 +1,8 @@
+# Ignore all CSV files
+*.csv
+
+# You might also want to ignore other generated files or build artifacts
+# For example, if your C++ compilation produces .o files or executables without extensions:
+# *.o
+# *.out
+# executable_name
