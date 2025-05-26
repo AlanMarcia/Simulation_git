@@ -7,6 +7,7 @@
 #include <random>
 #include <algorithm> // For std::min, std::max
 #include <sstream>   // For std::stringstream
+#include <omp.h>     // For OpenMP
 
 #if defined(_WIN32)
     #include <direct.h> // For _mkdir
@@ -29,9 +30,9 @@ const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
 const int NUM_PROTONS = 10000;
-const double TIME_STEP_S = 1e-12;       // Time step in seconds (SI)
+const double TIME_STEP_S = 1e-14;       // Time step in seconds (SI)
 const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
-const double OUTPUT_TIME_INTERVAL_S = 1e-10; // Interval for writing trajectory data (SI)
+const double OUTPUT_TIME_INTERVAL_S = 1e-12; // Interval for writing trajectory data (SI)
 // Initial X position will be set in main after loading geometry, in meters
 
 // --- Structures ---
@@ -436,14 +437,25 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
 }
 
 
-int main() {
-    std::cout << std::fixed << std::setprecision(6);
+int main(int argc, char* argv[]) { // Modified main signature
+    
+    std::string input_base_folder_name = "geometria_Denti_sfasati_profondi_5um_default"; // Default input folder
+    if (argc > 1) {
+        input_base_folder_name = argv[1]; // Use the first command-line argument as folder name
+        std::cout << "Input data folder specified: " << input_base_folder_name << std::endl;
+    } else {
+        std::cout << "No input data folder specified, using default: " << input_base_folder_name << std::endl;
+    }
+    const std::string folder = input_base_folder_name; // Use 'folder' as it was used before, now initialized from CLI or default
 
-    const std::string input_base_folder = "geometria_Denti_sfasati_profondi_10kV"; // Input folder
-    // const std::string output_traj_folder = input_base_folder + "/proton_trajectories"; // Removed
+    // The line below was: const std::string input_base_folder = folder; 
+    // It's redundant now as 'folder' serves this purpose.
+    // We will use 'folder' directly where 'input_base_folder' was used.
+
+    // const std::string output_traj_folder = folder + "/proton_trajectories"; // Removed
     // create_directory_if_not_exists(output_traj_folder); // Removed
 
-    const std::string all_trajectories_filename = input_base_folder + "/all_proton_trajectories.csv";
+    const std::string all_trajectories_filename = folder + "/all_proton_trajectories.csv";
     std::ofstream all_trajectories_file_stream;
     all_trajectories_file_stream.open(all_trajectories_filename, std::ios::out);
     if (!all_trajectories_file_stream.is_open()) {
@@ -455,14 +467,14 @@ int main() {
 
 
     GeometryParameters geom;
-    if (!load_geometry_params(input_base_folder + "/geometry_params.csv", geom)) {
+    if (!load_geometry_params(folder + "/geometry_params.csv", geom)) { // Use 'folder'
         std::cerr << "Warning: Problem loading from geometry_params.csv. Proceeding with defaults/derivations." << std::endl;
         // geom.h, geom.x_fs, geom.x_sl will be 0.0 if file not found or keys missing.
     }
 
     std::vector<double> x_coords, y_coords;
-    if (!load_1d_csv(input_base_folder + "/x_coordinates.csv", x_coords, true /*convert_to_meters*/) ||
-        !load_1d_csv(input_base_folder + "/y_coordinates.csv", y_coords, true /*convert_to_meters*/)) {
+    if (!load_1d_csv(folder + "/x_coordinates.csv", x_coords, true /*convert_to_meters*/) || // Use 'folder'
+        !load_1d_csv(folder + "/y_coordinates.csv", y_coords, true /*convert_to_meters*/)) { // Use 'folder'
         std::cerr << "Failed to load coordinates. Exiting." << std::endl;
         return 1;
     }
@@ -517,9 +529,9 @@ int main() {
     std::vector<std::vector<double>> Ex_field, Ey_field; 
     std::vector<std::vector<double>> eps_r_map_data;     
 
-    if (!load_field_csv(input_base_folder + "/electric_field_x.csv", Ex_field, Nx, Ny) ||
-        !load_field_csv(input_base_folder + "/electric_field_y.csv", Ey_field, Nx, Ny) ||
-        !load_permittivity_map(input_base_folder + "/permittivity.csv", eps_r_map_data, Nx, Ny)) {
+    if (!load_field_csv(folder + "/electric_field_x.csv", Ex_field, Nx, Ny) || // Use 'folder'
+        !load_field_csv(folder + "/electric_field_y.csv", Ey_field, Nx, Ny) || // Use 'folder'
+        !load_permittivity_map(folder + "/permittivity.csv", eps_r_map_data, Nx, Ny)) { // Use 'folder'
         std::cerr << "Failed to load electric field or permittivity data. Exiting." << std::endl;
         return 1;
     }
@@ -563,7 +575,7 @@ int main() {
     
     std::vector<Proton> protons(NUM_PROTONS);
     std::mt19937 rng(std::random_device{}()); // Corrected initialization
-    std::uniform_real_distribution<double> dist_y(20e-6,30e-6 ); 
+    std::uniform_real_distribution<double> dist_y(20e-6,35e-6); // y in meters
 
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
@@ -595,14 +607,13 @@ int main() {
 
         bool needs_output_this_step = ((step + 1) % output_every_n_steps == 0);
 
+        #pragma omp parallel for
         for (int i = 0; i < NUM_PROTONS; ++i) {
             if (!protons[i].active) continue;
 
-            Proton& p = protons[i];
-            // std::string traj_filename_for_proton = output_traj_folder + "/proton_" + std::to_string(i) + "_trajectory.csv"; // Removed
-            // std::ofstream traj_file_stream_loop; // Removed
+            Proton& p = protons[i]; // Each thread works on its own proton p
 
-            // RK4 step
+            // RK4 step variables are local to each iteration/thread
             std::pair<double, double> a1, a2, a3, a4;
             double k1x, k1y, k1vx, k1vy;
             double k2x, k2y, k2vx, k2vy;
@@ -637,38 +648,50 @@ int main() {
             k4x = TIME_STEP_S * (p.vx + k3vx);
             k4y = TIME_STEP_S * (p.vy + k3vy);
 
+            // Update proton state (these writes are safe as each thread owns its protons[i])
             p.x += (k1x + 2.0*k2x + 2.0*k3x + k4x) / 6.0;
             p.y += (k1y + 2.0*k2y + 2.0*k3y + k4y) / 6.0;
             p.vx += (k1vx + 2.0*k2vx + 2.0*k3vx + k4vx) / 6.0;
             p.vy += (k1vy + 2.0*k2vy + 2.0*k3vy + k4vy) / 6.0;
 
-            // bool became_inactive_this_substep = false; // Not strictly needed anymore for file closing logic
 
             // Check if proton reached the end successfully
             if (p.x >= L_total_sim) { // L_total_sim is in meters
-                protons_reached_end_successfully++;
-                p.active = false;
-                active_protons_count--;
-                // became_inactive_this_substep = true; // Not strictly needed
-                // Write final position to the single file
-                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                if (p.active) { // Ensure this block is executed only once per proton
+                    p.active = false;
+                    #pragma omp atomic update
+                    protons_reached_end_successfully++;
+                    #pragma omp atomic update
+                    active_protons_count--;
+                    
+                    #pragma omp critical (trajectory_file_write)
+                    {
+                        all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                    }
+                }
                 continue; 
             }
 
             // Check if proton hit material or went out of other bounds (all checks in meters)
-            if (is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
-                p.active = false;
+            if (p.active && is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
+                p.active = false; // This modification to p.active is safe
+                #pragma omp atomic update
                 active_protons_count--;
-                // became_inactive_this_substep = true; // Not strictly needed
-                 // Write final position before deactivating due to collision/OOB to the single file
-                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                
+                #pragma omp critical (trajectory_file_write)
+                {
+                    all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                }
             }
 
             // Regular output if still active and it's an output step
             if (p.active && needs_output_this_step) {
-                all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                #pragma omp critical (trajectory_file_write)
+                {
+                    all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                }
             }
-        }
+        } // End of parallel for loop over protons
 
         current_time += TIME_STEP_S;
         

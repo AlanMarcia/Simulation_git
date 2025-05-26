@@ -146,13 +146,13 @@ void saveGeometryParamsToCSV(const std::string& filename,
 }
 
 
-int main() {
+int main(int argc, char* argv[]) { // Modified main signature
     // --- Parameters ---
     const double h = 0.5; // Grid spacing in micrometers (µm)
 
     // Dimensions in µm
     const double L_total = 320.0;
-    const double H_total = 50.0;
+  
 
     const double x_free_space = 10.0;
     const double x_structure_len = 300.0;
@@ -173,7 +173,7 @@ int main() {
     const double y_spacing_dig_depth_increment_um = 1.0; // Increment for digging depth (L to R)
 
     const double y_vacuum_gap_thick = 10.0; // µm
-
+      const double H_total = 55 ; // Total height of the structure
     // SOR parameters
     const double omega = 1.8; // Relaxation factor
     const double tolerance = 1e-5; // Convergence tolerance
@@ -185,10 +185,18 @@ int main() {
 
     // Boundary conditions
     const double V_left = 0.0;  // Volts
-    const double V_right = -10000.0; // Volts
+    const double V_right = -1000.0; // Volts
 
     // Create output folder
-    const std::string output_folder = "geometria_Denti_sfasati_profondi_10kV";
+    std::string output_folder_name = "geometria_Denti_sfasati_profondi_5um_default"; // Default name
+    if (argc > 1) {
+        output_folder_name = argv[1]; // Use the first command-line argument as folder name
+        std::cout << "Output folder specified: " << output_folder_name << std::endl;
+    } else {
+        std::cout << "No output folder specified, using default: " << output_folder_name << std::endl;
+    }
+    const std::string output_folder = output_folder_name;
+
 
     // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;

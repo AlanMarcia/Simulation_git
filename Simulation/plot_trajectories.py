@@ -4,6 +4,7 @@ import matplotlib.patches as patches
 import os
 import glob
 import numpy as np # For NaN comparison if needed, and math.
+import sys # Import sys module for command-line arguments
 
 # Physical constants
 M_PROTON_KG = 1.67262192e-27  # Mass of proton in kg
@@ -54,8 +55,18 @@ def load_2d_csv(filename):
         print(f"Error loading 2D CSV file {filename}: {e}")
         return None
 
-def main():
-    input_base_folder = "geometria_Denti_sfasati_profondi_10kV" # Base folder for input files
+def main(folder_path=None): # Add folder_path argument
+    if folder_path:
+        input_base_folder = folder_path
+        print(f"Using specified folder for trajectory data: {input_base_folder}")
+    else:
+        input_base_folder = "geometria_Denti_uguali_5um" # Default base folder for input files
+        print(f"No folder specified, using default for trajectory data: {input_base_folder}")
+
+    if not os.path.isdir(input_base_folder):
+        print(f"Error: The specified folder '{input_base_folder}' does not exist or is not a directory.")
+        print("Please ensure the C++ simulation has run and created this folder with CSV files.")
+        return
 
     # trajectories_folder = os.path.join(input_base_folder, "proton_trajectories") # Removed
     all_trajectories_file = os.path.join(input_base_folder, "all_proton_trajectories.csv") # New single file
@@ -125,7 +136,7 @@ def main():
         proton_ids = list(grouped_trajectories.groups.keys())
         num_protons_in_file = len(proton_ids)
         
-        num_trajectories_to_plot = min(num_protons_in_file, 100)
+        num_trajectories_to_plot = min(num_protons_in_file, 1000)
 
         # Plot a subset of trajectories
         for i, proton_id in enumerate(proton_ids):
@@ -228,4 +239,7 @@ def main():
         print("No successful protons found to generate an energy histogram.")
 
 if __name__ == "__main__":
-    main()
+    cli_folder_path = None
+    if len(sys.argv) > 1:
+        cli_folder_path = sys.argv[1]
+    main(folder_path=cli_folder_path)

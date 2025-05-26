@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import csv
 import glob # For finding trajectory files
+import sys # Import sys module for command-line arguments
 
 # Constants for energy calculation
 M_PROTON = 1.67262192e-27  # kg
@@ -43,12 +44,21 @@ def load_geometry_params_for_plot(filepath):
         return None
     return params
 
-def plot_results():
-    # Create output folder
-    output_folder_name = "geometria_Denti_sfasati_profondi_10kV" # Renamed for clarity
-    os.makedirs(output_folder_name, exist_ok=True)
+def plot_results(folder_path=None): # Add folder_path argument
+    # Determine output folder
+    if folder_path:
+        output_folder_name = folder_path
+        print(f"Using specified folder: {output_folder_name}")
+    else:
+        output_folder_name = "geometria_Denti_sfasati_profondi_5um" # Default folder
+        print(f"No folder specified, using default: {output_folder_name}")
+    
+    if not os.path.isdir(output_folder_name):
+        print(f"Error: The specified folder '{output_folder_name}' does not exist or is not a directory.")
+        print("Please ensure the C++ simulation has run and created this folder with CSV files.")
+        return None # Return None if folder doesn't exist
 
-    # File paths
+    # File paths are now relative to output_folder_name
     potential_file = os.path.join(output_folder_name, "potential.csv")
     ex_file = os.path.join(output_folder_name, "electric_field_x.csv")
     ey_file = os.path.join(output_folder_name, "electric_field_y.csv")
@@ -68,7 +78,7 @@ def plot_results():
 
     if V is None or Ex is None or Ey is None or eps_r is None or x_coords is None or y_coords is None:
         print("One or more data files could not be loaded. Aborting plot.")
-        return
+        return None # Return None on failure
     
     # Attempt to load geometry parameters for profile plot, proceed if available
     y_center_gap_idx = None
@@ -267,7 +277,12 @@ def plot_results():
     return output_folder_name # Return for use in __main__
 
 if __name__ == '__main__':
-    output_dir = plot_results()
+    cli_folder_path = None
+    if len(sys.argv) > 1:
+        cli_folder_path = sys.argv[1]
+    
+    output_dir = plot_results(folder_path=cli_folder_path) # Pass the folder path
+
     if output_dir: # Check if plot_results returned a valid path
         print(f"Plotting finished. Plots saved to {output_dir} folder.")
     else:
