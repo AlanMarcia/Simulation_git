@@ -6,7 +6,6 @@
 #include <string>
 #include <algorithm> // For std::min, std::max
 #include <omp.h>     // For OpenMP
-#include "geometry_definitions.h" // Includi il nuovo header
 
 #if defined(_WIN32)
     #include <direct.h> // For _mkdir
@@ -21,7 +20,7 @@
     #define STAT_FUNC stat
 #endif
 
-// Helper function to save a 2D vector to a CSV file (può rimanere qui o essere spostata se usata solo da poisson_solver)
+// Helper function to save a 2D vector to a CSV file
 void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
@@ -38,7 +37,7 @@ void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& 
     std::cout << "Data saved to " << filename << std::endl;
 }
 
-// Helper function to save a 1D vector to a CSV file (può rimanere qui)
+// Helper function to save a 1D vector to a CSV file (single column)
 void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& filename) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
@@ -52,115 +51,153 @@ void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& 
     std::cout << "Coordinates saved to " << filename << std::endl;
 }
 
-// La funzione saveGeometryParamsToCSV è stata spostata in geometry_definitions.cpp e rinominata saveGeometryParams
-
-int main(int argc, char* argv[]) { 
-    // --- Command Line Argument Parsing ---
-    std::string output_folder_name = "default_output";
-    if (argc > 1) {
-        output_folder_name = argv[1];
-    } else {
-        std::cout << "No output folder specified, using default: " << output_folder_name << std::endl;
+// Helper function to save geometry parameters
+void saveGeometryParamsToCSV(const std::string& filename,
+                             double h_val,
+                             double x_fs, double x_sl,
+                             double y_slt, double y_vgt,
+                             double H_tot) {
+    std::ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
+        return;
     }
+    outfile << std::fixed << std::setprecision(10); // Ensure precision
+    outfile << "h," << h_val << std::endl;
+    outfile << "x_free_space," << x_fs << std::endl;
+    outfile << "x_structure_len," << x_sl << std::endl;
+    outfile << "y_si_layer_thick," << y_slt << std::endl;
+    outfile << "y_vacuum_gap_thick," << y_vgt << std::endl;
+    outfile << "H_total," << H_tot << std::endl;
+    outfile.close();
+    std::cout << "Geometry parameters saved to " << filename << std::endl;
+}
 
-    std::string geometry_type_str = "piana"; // Default geometry
-    if (argc > 2) {
-        geometry_type_str = argv[2];
-    } else {
-        std::cout << "No geometry type specified, using default: " << geometry_type_str << std::endl;
-    }
-    
-    GeometryType current_geometry_type = stringToGeometryType(geometry_type_str);
-    if (current_geometry_type == GeometryType::UNKNOWN) {
-        std::cerr << "Error: Unknown geometry type '" << geometry_type_str << "'. Exiting." << std::endl;
-        return 1;
-    }
-    
-    std::cout << "Selected output folder: " << output_folder_name << std::endl;
-    std::cout << "Selected geometry type: " << geometryTypeToString(current_geometry_type) << std::endl;
 
-    const std::string output_folder = output_folder_name; // Usa output_folder come prima
+int main() {
+    // --- Parameters ---
+    const double h = 0.5; // Grid spacing in micrometers (µm)
 
-    // --- Common Parameters ---
-    const double common_h_param = 0.5; // Grid spacing in micrometers (µm)
-    const double V_left_bc = 0.0;  // Volts
-    const double V_right_bc = -1000.0; // Volts
-    const double omega_sor = 1.8; // Relaxation factor
-    const int max_iter_sor = 500000;
-    
-    // Material properties
-    const double eps_sio2_mat = 3.9;
-    const double eps_si_mat = 11.7;
-    const double eps_vac_mat = 1.0;
+    // Dimensions in µm
+    const double L_total = 320.0;
+    const double H_total = 30.0;
 
-    // Dichiarazione delle strutture dei parametri
-    GeometryConfig geom_config;
-    PianaSpecificParams piana_geom_params;
-    DentiSfasatiProfondiSpecificParams denti_geom_params;
-    DentiUgualiSpecificParams du_geom_params; // Added
+    const double x_free_space = 10.0;
+    const double x_structure_len = 300.0;
+    const double y_si_layer_thick = 10.0;
+    const double y_vacuum_gap_thick = 10.0;
 
-    // Inizializzazione dei parametri basata sul tipo di geometria
-    if (current_geometry_type == GeometryType::PIANA) {
-        initializePianaGeometry(geom_config, piana_geom_params, common_h_param, eps_sio2_mat, eps_vac_mat);
-    } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
-        initializeDentiSfasatiProfondiGeometry(geom_config, denti_geom_params, common_h_param, eps_si_mat, eps_vac_mat);
-    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
-        initializeDentiUgualiGeometry(geom_config, du_geom_params, common_h_param, eps_si_mat, eps_vac_mat);
-    }
+    // SOR parameters
+    const double omega = 1.8; // Relaxation factor
+    const double tolerance = 1e-4; // Convergence tolerance
+    const int max_iterations = 500000;
 
-    // Attempt to create the output directory
+    // Material properties (relative permittivity)
+    const double eps_si = 11.7;
+    const double eps_vac = 1.0;
+
+    // Boundary conditions
+    const double V_left = 0.0;  // Volts
+    const double V_right = -1000.0; // Volts
+
+    // Create output folder
+    const std::string output_folder = "geometria_piana";
+
+    // Attempt to create the output directory if it doesn't exist
     struct STAT_STRUCT info;
-    if (STAT_FUNC(output_folder.c_str(), &info) != 0) {
-        MKDIR(output_folder.c_str());
+    if (STAT_FUNC(output_folder.c_str(), &info) != 0) { // Check if directory exists
+        if (MKDIR(output_folder.c_str()) == 0) {
+            std::cout << "Output directory '" << output_folder << "' created." << std::endl;
+        } else {
+            std::cerr << "Error: Could not create output directory '" << output_folder << "'. Please create it manually." << std::endl;
+            // Optionally, exit if directory creation is critical and failed
+            // return 1; 
+        }
+    } else if (!(info.st_mode & S_IFDIR)) { // Check if it's a directory
+        std::cerr << "Error: '" << output_folder << "' exists but is not a directory. Please remove it or rename it." << std::endl;
+        // Optionally, exit
+        // return 1;
+    } else {
+        std::cout << "Output directory '" << output_folder << "' already exists." << std::endl;
     }
+    // The following line requires C++17 (or later) and the <filesystem> header.
+    // It was commented out to resolve compilation errors if not using a C++17 compliant compiler/flags.
+    // An alternative pre-C++17 directory creation attempt has been added above.
+    // std::filesystem::create_directory(output_folder);
 
-    // Save geometry parameters
-    if (current_geometry_type == GeometryType::PIANA) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, &piana_geom_params, nullptr, nullptr);
-    } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);
-    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, &du_geom_params);
-    }
-
+    // Save geometry parameters before extensive calculations
+    saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
+                            h, 
+                            x_free_space, x_structure_len, 
+                            y_si_layer_thick, y_vacuum_gap_thick, 
+                            H_total);
 
     // --- Grid Setup ---
-    const int Nx = static_cast<int>(geom_config.L_total / geom_config.h) + 1;
-    const int Ny = static_cast<int>(geom_config.H_total_val / geom_config.h) + 1;
+    const int Nx = static_cast<int>(L_total / h) + 1;
+    const int Ny = static_cast<int>(H_total / h) + 1;
 
     std::vector<double> x_coords(Nx);
     std::vector<double> y_coords(Ny);
-    for (int i = 0; i < Nx; ++i) {
-        x_coords[i] = i * geom_config.h;
-    }
-    for (int j = 0; j < Ny; ++j) {
-        y_coords[j] = j * geom_config.h;
-    }
+    for (int i = 0; i < Nx; ++i) x_coords[i] = i * h;
+    for (int j = 0; j < Ny; ++j) y_coords[j] = j * h;
 
     std::vector<std::vector<double>> V(Nx, std::vector<double>(Ny, 0.0));
-    std::vector<std::vector<double>> eps_r(Nx, std::vector<double>(Ny, geom_config.eps_vacuum_val)); // Usa eps_vacuum_val da config
+    std::vector<std::vector<double>> eps_r(Nx, std::vector<double>(Ny, eps_vac));
     std::vector<std::vector<bool>> fixed_potential_mask(Nx, std::vector<bool>(Ny, false));
 
     // --- Define Material Regions ---
-    if (current_geometry_type == GeometryType::PIANA) {
-        setupPianaPermittivity(eps_r, geom_config, piana_geom_params, Nx, Ny);
-    } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
-        setupDentiSfasatiProfondiPermittivity(eps_r, geom_config, denti_geom_params, Nx, Ny);
-    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
-        setupDentiUgualiPermittivity(eps_r, geom_config, du_geom_params, Nx, Ny);
+    const int idx_x_struct_start = static_cast<int>(x_free_space / h);
+    const int idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len) / h);
+
+    const int idx_y_si_bot_end = static_cast<int>(y_si_layer_thick / h);
+    const int idx_y_vac_start = idx_y_si_bot_end + 1; // Not strictly needed for assignment if default is vac
+    const int idx_y_vac_end = static_cast<int>((y_si_layer_thick + y_vacuum_gap_thick) / h);
+    const int idx_y_si_top_start = idx_y_vac_end; // Note: if h=1, vac_end is 20, si_top_start is 20.
+
+    for (int i = idx_x_struct_start; i <= idx_x_struct_end; ++i) {
+        // Bottom Silicon layer
+        for (int j = 0; j <= idx_y_si_bot_end; ++j) {
+            eps_r[i][j] = eps_si;
+        }
+        // Top Silicon layer
+        for (int j = idx_y_si_top_start; j < Ny; ++j) {
+            eps_r[i][j] = eps_si;
+        }
     }
     
     std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << std::endl;
+    std::cout << "Structure x-indices: " << idx_x_struct_start << " to " << idx_x_struct_end << std::endl;
+    std::cout << "Bottom Si y-indices: 0 to " << idx_y_si_bot_end << std::endl;
+    std::cout << "Vacuum y-indices (approx): " << idx_y_si_bot_end + 1 << " to " << idx_y_si_top_start -1 << std::endl;
+    std::cout << "Top Si y-indices: " << idx_y_si_top_start << " to " << Ny - 1 << std::endl;
+
 
     // --- Boundary Conditions ---
-    setupBoundaryConditions(V, fixed_potential_mask, eps_r, geom_config, V_left_bc, V_right_bc, Nx, Ny);
+    // Left side of Silicon layers (0V)
+    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
+        V[idx_x_struct_start][j] = V_left;
+        fixed_potential_mask[idx_x_struct_start][j] = true;
+    }
+    for (int j = idx_y_si_top_start; j < Ny; ++j) {
+        V[idx_x_struct_start][j] = V_left;
+        fixed_potential_mask[idx_x_struct_start][j] = true;
+    }
+
+    // Right side of Silicon layers (-1kV)
+    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
+        V[idx_x_struct_end][j] = V_right;
+        fixed_potential_mask[idx_x_struct_end][j] = true;
+    }
+    for (int j = idx_y_si_top_start; j < Ny; ++j) {
+        V[idx_x_struct_end][j] = V_right;
+        fixed_potential_mask[idx_x_struct_end][j] = true;
+    }
 
     // --- SOR Iteration ---
-    double tolerance_sor = geom_config.current_tolerance; // Usa la tolleranza dalla configurazione
-    for (int iteration = 0; iteration < max_iter_sor; ++iteration) {
-        double max_diff_iter = 0.0;
+    for (int iteration = 0; iteration < max_iterations; ++iteration) {
+        double max_diff_iter = 0.0; // Reset for each iteration, OpenMP reduction will use this
 
-        // Phase 1: Update "red" points
+        // Phase 1: Update "red" points ((i+j) % 2 == 0)
         #pragma omp parallel for reduction(max:max_diff_iter)
         for (int i = 1; i < Nx - 1; ++i) {
             for (int j = 1; j < Ny - 1; ++j) {
@@ -182,7 +219,7 @@ int main(int argc, char* argv[]) {
                                      eps_n * V[i][j+1] + eps_s * V[i][j-1]) / sum_eps;
                     
                     double v_old_ij = V[i][j];
-                    V[i][j] = (1.0 - omega_sor) * v_old_ij + omega_sor * val_GS; // Usa omega_sor
+                    V[i][j] = (1.0 - omega) * v_old_ij + omega * val_GS;
                     double current_point_diff = std::abs(V[i][j] - v_old_ij);
                     if (current_point_diff > max_diff_iter) {
                         max_diff_iter = current_point_diff;
@@ -191,7 +228,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Phase 2: Update "black" points
+        // Phase 2: Update "black" points ((i+j) % 2 != 0)
         #pragma omp parallel for reduction(max:max_diff_iter)
         for (int i = 1; i < Nx - 1; ++i) {
             for (int j = 1; j < Ny - 1; ++j) {
@@ -213,7 +250,7 @@ int main(int argc, char* argv[]) {
                                      eps_n * V[i][j+1] + eps_s * V[i][j-1]) / sum_eps;
                     
                     double v_old_ij = V[i][j];
-                    V[i][j] = (1.0 - omega_sor) * v_old_ij + omega_sor * val_GS; // Usa omega_sor
+                    V[i][j] = (1.0 - omega) * v_old_ij + omega * val_GS;
                     double current_point_diff = std::abs(V[i][j] - v_old_ij);
                     if (current_point_diff > max_diff_iter) {
                         max_diff_iter = current_point_diff;
@@ -250,12 +287,12 @@ int main(int argc, char* argv[]) {
             std::cout << "Iteration " << iteration + 1 << ", Max Potential Change: " << std::scientific << max_diff_iter << std::fixed << std::endl;
         }
 
-        if (max_diff_iter < tolerance_sor) { // Usa tolerance_sor
+        if (max_diff_iter < tolerance) {
             std::cout << "Converged after " << iteration + 1 << " iterations." << std::endl;
             break;
         }
-        if (iteration == max_iter_sor - 1) { // Usa max_iter_sor
-             std::cout << "Max iterations (" << max_iter_sor << ") reached. Max diff: " << std::scientific << max_diff_iter << std::fixed << std::endl;
+        if (iteration == max_iterations - 1) {
+             std::cout << "Max iterations (" << max_iterations << ") reached. Max diff: " << std::scientific << max_diff_iter << std::fixed << std::endl;
         }
     }
 
@@ -265,23 +302,23 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < Nx - 1; ++i) {
         for (int j = 0; j < Ny; ++j) {
-            Ex[i][j] = -(V[i+1][j] - V[i-1][j]) / (2 * geom_config.h);
+            Ex[i][j] = -(V[i+1][j] - V[i-1][j]) / (2 * h);
         }
     }
     for (int i = 0; i < Nx; ++i) {
         for (int j = 1; j < Ny - 1; ++j) {
-            Ey[i][j] = -(V[i][j+1] - V[i][j-1]) / (2 * geom_config.h);
+            Ey[i][j] = -(V[i][j+1] - V[i][j-1]) / (2 * h);
         }
     }
 
     // Forward/backward difference for boundaries
     for (int j = 0; j < Ny; ++j) {
-        Ex[0][j] = -(V[1][j] - V[0][j]) / geom_config.h; // Usa geom_config.h
-        Ex[Nx-1][j] = -(V[Nx-1][j] - V[Nx-2][j]) / geom_config.h; // Usa geom_config.h
+        Ex[0][j] = -(V[1][j] - V[0][j]) / h;
+        Ex[Nx-1][j] = -(V[Nx-1][j] - V[Nx-2][j]) / h;
     }
     for (int i = 0; i < Nx; ++i) {
-        Ey[i][0] = -(V[i][1] - V[i][0]) / geom_config.h; // Usa geom_config.h
-        Ey[i][Ny-1] = -(V[i][Ny-1] - V[i][Ny-2]) / geom_config.h; // Usa geom_config.h
+        Ey[i][0] = -(V[i][1] - V[i][0]) / h;
+        Ey[i][Ny-1] = -(V[i][Ny-1] - V[i][Ny-2]) / h;
     }
 
     // --- Output Results to CSV ---

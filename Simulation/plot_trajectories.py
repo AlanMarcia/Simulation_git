@@ -72,6 +72,8 @@ def main(folder_path=None): # Add folder_path argument
     all_trajectories_file = os.path.join(input_base_folder, "all_proton_trajectories.csv") # New single file
     output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.png") # Changed to .png
     output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.png") # Changed to .png
+    output_accel_plot_file = os.path.join(input_base_folder, "proton_acceleration_profile.png") # New plot file
+    output_vel_plot_file = os.path.join(input_base_folder, "proton_velocity_profile.png") # New plot file for velocity
 
     # geom_params_file = os.path.join(input_base_folder, "geometry_params.csv") # File still exists, but not used for plotting shapes
     eps_r_file = os.path.join(input_base_folder, "permittivity.csv")
@@ -99,18 +101,46 @@ def main(folder_path=None): # Add folder_path argument
 
     # Plot geometry outlines using permittivity map
     X_mesh, Y_mesh = np.meshgrid(x_coords, y_coords)
-    eps_vac_assumed = 1.0
-    eps_si_assumed = 11.7 # Typical value for silicon
-    outline_threshold = (eps_vac_assumed + eps_si_assumed) / 2.0
     
-    ax.contour(X_mesh, Y_mesh, eps_r_data, levels=[outline_threshold], colors='blue', linewidths=0.8, linestyles='--')
+    # Dynamically calculate outline_threshold from eps_r_data
+    outline_threshold = None
+    if eps_r_data is not None:
+        unique_eps_values = np.unique(eps_r_data)
+        unique_eps_values.sort() # Ensure sorted
+        if len(unique_eps_values) >= 2:
+            val_low = unique_eps_values[0]
+            val_high = unique_eps_values[-1]
+            if val_high > val_low + 0.5: # Heuristic: difference must be at least 0.5
+                outline_threshold = (val_low + val_high) / 2.0
+                print(f"Dynamically calculated outline threshold for trajectories plot: {outline_threshold:.2f} (from eps_r min/max: {val_low:.2f}, {val_high:.2f})")
+            else:
+                print(f"Warning (trajectories plot): Unique permittivity values ({unique_eps_values}) are too close. Could not reliably determine outline threshold.")
+        elif len(unique_eps_values) == 1:
+            print(f"Warning (trajectories plot): Permittivity data contains only one unique value ({unique_eps_values[0]:.2f}). No outlines will be drawn.")
+        else:
+            print("Warning (trajectories plot): Could not process permittivity data for outlines.")
+    else:
+        print("Warning (trajectories plot): Permittivity data (eps_r_data) is None. Cannot draw outlines.")
+
+    # eps_vac_assumed = 1.0 # Old method
+    # eps_si_assumed = 11.7 # Typical value for silicon # Old method
+    # outline_threshold = (eps_vac_assumed + eps_si_assumed) / 2.0 # Old method
     
-    # Add a proxy artist for the legend entry for structure outline
-    structure_outline_proxy = plt.Line2D([0], [0], linestyle="--", color="blue", label='Structure Outline (from εr)')
+    if outline_threshold is not None:
+        ax.contour(X_mesh, Y_mesh, eps_r_data, levels=[outline_threshold], colors='blue', linewidths=0.8, linestyles='--')
+        # Add a proxy artist for the legend entry for structure outline
+        structure_outline_proxy = plt.Line2D([0], [0], linestyle="--", color="blue", label='Structure Outline (from εr)')
+    else:
+        # Create a dummy proxy if no outline is drawn, so legend logic doesn't break
+        structure_outline_proxy = plt.Line2D([0], [0], linestyle="none", label='Structure Outline (not drawn)')
+        print("Skipping structure outline on trajectory plot as threshold could not be determined.")
+    
     # ax.legend(handles=[structure_outline_proxy], loc='upper right') # Initial legend setup
 
     final_energies_eV = []
     successful_protons_count = 0
+    all_acceleration_data = [] # To store {'x_m': x_position, 'a_mag_mps2': acceleration_magnitude}
+    all_velocity_data = [] # To store {'x_m': x_position, 'v_mag_mps': velocity_magnitude}
 
     # trajectory_files = glob.glob(os.path.join(trajectories_folder, "proton_*_trajectory.csv")) # Removed
     
@@ -151,12 +181,12 @@ def main(folder_path=None): # Add folder_path argument
                     line.set_label('Proton Trajectories') # Add label to one line for the legend
                     plotted_traj_legend_added = True
         
-        # Process all trajectories for energy histogram
+        # Process all trajectories for energy histogram and acceleration
         for proton_id in proton_ids:
             df_traj = grouped_trajectories.get_group(proton_id)
             if not df_traj.empty:
+                # Energy calculation (existing code)
                 last_point = df_traj.iloc[-1]
-                # last_point['x_m'] is in meters. Compare with L_total_sim_um (converted to m)
                 if last_point['x_m'] >= (L_total_sim_um * 1e-6) - (grid_spacing_h_um * 1e-6 / 2.0) :
                     successful_protons_count += 1
                     # Velocities are already in m/s from the CSV
@@ -168,6 +198,29 @@ def main(folder_path=None): # Add folder_path argument
                     ke_joules = 0.5 * M_PROTON_KG * v_sq_mps
                     ke_eV = ke_joules / E_CHARGE_C
                     final_energies_eV.append(ke_eV)
+
+                # Acceleration calculation
+                if len(df_traj) >= 2:
+                    times = df_traj['time_s'].values
+                    x_positions = df_traj['x_m'].values
+                    vx_mps = df_traj['vx_m_per_s'].values
+                    vy_mps = df_traj['vy_m_per_s'].values
+
+                    for j in range(1, len(df_traj)):
+                        dt = times[j] - times[j-1]
+                        if dt > 0: # Avoid division by zero
+                            accel_x = (vx_mps[j] - vx_mps[j-1]) / dt
+                            accel_y = (vy_mps[j] - vy_mps[j-1]) / dt
+                            accel_mag = np.sqrt(accel_x**2 + accel_y**2)
+                            # Use x-position of the point where velocity is v[j]
+                            current_x_m = x_positions[j] 
+                            all_acceleration_data.append({'x_m': current_x_m, 'a_mag_mps2': accel_mag})
+                
+                # Velocity data extraction
+                for idx, row in df_traj.iterrows():
+                    v_mag = np.sqrt(row['vx_m_per_s']**2 + row['vy_m_per_s']**2)
+                    all_velocity_data.append({'x_m': row['x_m'], 'v_mag_mps': v_mag})
+
     else:
         print(f"No trajectory data loaded from {all_trajectories_file}. Skipping trajectory plotting and energy analysis.")
         num_trajectories_to_plot = 0
@@ -183,7 +236,10 @@ def main(folder_path=None): # Add folder_path argument
     
     # Update legend to include both structure and trajectories if any were plotted
     handles, labels = ax.get_legend_handles_labels()
-    custom_handles = [structure_outline_proxy]
+    custom_handles = []
+    if outline_threshold is not None: # Only add structure outline to legend if it was plotted
+        custom_handles.append(structure_outline_proxy)
+    
     if any(label == 'Proton Trajectories' for label in labels):
          # Find the trajectory handle to ensure it's included
         traj_handle = next((h for h, l in zip(handles, labels) if l == 'Proton Trajectories'), None)
@@ -237,6 +293,125 @@ def main(folder_path=None): # Add folder_path argument
         plt.close(fig_hist)
     else:
         print("No successful protons found to generate an energy histogram.")
+
+    # Plotting acceleration profile
+    if all_acceleration_data:
+        df_accel = pd.DataFrame(all_acceleration_data)
+        df_accel.replace([np.inf, -np.inf], np.nan, inplace=True) # Handle potential infinities
+        df_accel.dropna(subset=['a_mag_mps2'], inplace=True) # Remove NaNs
+
+        if not df_accel.empty:
+            num_bins = 100 # Number of bins along x-axis
+            # Ensure x_bins cover the full range of x_coords for context, even if no accel data there
+            min_x_coord_m = x_coords[0] * 1e-6 if x_coords else df_accel['x_m'].min()
+            max_x_coord_m = x_coords[-1] * 1e-6 if x_coords else df_accel['x_m'].max()
+
+            # Filter df_accel to be within the simulation's x_coords range before binning
+            df_accel_filtered = df_accel[(df_accel['x_m'] >= min_x_coord_m) & (df_accel['x_m'] <= max_x_coord_m)].copy() # Use .copy() to avoid SettingWithCopyWarning
+            
+            if not df_accel_filtered.empty:
+                x_bins = np.linspace(min_x_coord_m, max_x_coord_m, num_bins + 1)
+                # Use .loc for assignment to ensure it works on the DataFrame/copy
+                df_accel_filtered.loc[:, 'x_bin_group'] = pd.cut(df_accel_filtered['x_m'], bins=x_bins, include_lowest=True, right=True)
+                
+                binned_accel_stats = df_accel_filtered.groupby('x_bin_group', observed=False)['a_mag_mps2'].agg(['mean', 'std']).reset_index()
+                binned_accel_stats['x_bin_center_m'] = binned_accel_stats['x_bin_group'].apply(lambda x: x.mid if isinstance(x, pd.Interval) else np.nan)
+                binned_accel_stats.dropna(subset=['x_bin_center_m'], inplace=True) # Remove rows where center couldn't be calculated
+                binned_accel_stats['std'].fillna(0, inplace=True) # Fill NaN std (e.g. for bins with 1 point)
+
+                if not binned_accel_stats.empty:
+                    fig_accel, ax_accel = plt.subplots(figsize=(12, 7))
+                    
+                    # Ensure x_bin_center_m is float before multiplication
+                    x_plot_um = binned_accel_stats['x_bin_center_m'].astype(float) * 1e6 # Convert x to µm for plotting
+                    mean_a_plot = binned_accel_stats['mean']
+                    std_a_plot = binned_accel_stats['std']
+
+                    ax_accel.plot(x_plot_um, mean_a_plot, color='dodgerblue', linestyle='-', linewidth=1.5, label='Mean Acceleration Magnitude')
+                    ax_accel.fill_between(x_plot_um, mean_a_plot - std_a_plot, mean_a_plot + std_a_plot, color='lightskyblue', alpha=0.4, label='Std Dev (Fluctuation)')
+                    
+                    ax_accel.set_xlabel("X-position (µm)")
+                    ax_accel.set_ylabel("Acceleration Magnitude (m/s²)")
+                    ax_accel.set_title("Mean Proton Acceleration Magnitude vs. X-position")
+                    ax_accel.legend(loc='upper right')
+                    ax_accel.grid(True, linestyle=':', alpha=0.7)
+                    ax_accel.set_xlim(0, L_total_sim_um) # Use simulation domain limits
+                    # Optionally set y-limits if needed, e.g., ax_accel.set_ylim(bottom=0)
+                    
+                    plt.tight_layout()
+                    try:
+                        plt.savefig(output_accel_plot_file, dpi=300)
+                        print(f"Acceleration profile plot saved to {output_accel_plot_file}")
+                    except Exception as e:
+                        print(f"Error saving acceleration profile plot: {e}")
+                    plt.show()
+                    plt.close(fig_accel)
+                else:
+                    print("No valid binned acceleration data to plot.")
+            else:
+                print("No acceleration data points fall within the simulation's x-coordinate range.")
+        else:
+            print("No valid acceleration data to plot after cleaning.")
+    else:
+        print("No acceleration data calculated to generate a profile plot.")
+
+    # Plotting velocity profile
+    if all_velocity_data:
+        df_vel = pd.DataFrame(all_velocity_data)
+        df_vel.replace([np.inf, -np.inf], np.nan, inplace=True) # Handle potential infinities
+        df_vel.dropna(subset=['v_mag_mps'], inplace=True) # Remove NaNs
+
+        if not df_vel.empty:
+            num_bins_vel = 100 # Number of bins along x-axis for velocity
+            min_x_coord_m_vel = x_coords[0] * 1e-6 if x_coords else df_vel['x_m'].min()
+            max_x_coord_m_vel = x_coords[-1] * 1e-6 if x_coords else df_vel['x_m'].max()
+
+            df_vel_filtered = df_vel[(df_vel['x_m'] >= min_x_coord_m_vel) & (df_vel['x_m'] <= max_x_coord_m_vel)].copy()
+
+            if not df_vel_filtered.empty:
+                x_bins_vel = np.linspace(min_x_coord_m_vel, max_x_coord_m_vel, num_bins_vel + 1)
+                df_vel_filtered.loc[:, 'x_bin_group_vel'] = pd.cut(df_vel_filtered['x_m'], bins=x_bins_vel, include_lowest=True, right=True)
+                
+                binned_vel_stats = df_vel_filtered.groupby('x_bin_group_vel', observed=False)['v_mag_mps'].agg(['mean', 'std']).reset_index()
+                binned_vel_stats['x_bin_center_m_vel'] = binned_vel_stats['x_bin_group_vel'].apply(lambda x: x.mid if isinstance(x, pd.Interval) else np.nan)
+                binned_vel_stats.dropna(subset=['x_bin_center_m_vel'], inplace=True)
+                binned_vel_stats['std'].fillna(0, inplace=True)
+
+                if not binned_vel_stats.empty:
+                    fig_vel, ax_vel = plt.subplots(figsize=(12, 7))
+                    
+                    x_plot_um_vel = binned_vel_stats['x_bin_center_m_vel'].astype(float) * 1e6
+                    mean_v_plot = binned_vel_stats['mean']
+                    std_v_plot = binned_vel_stats['std']
+
+                    ax_vel.plot(x_plot_um_vel, mean_v_plot, color='green', linestyle='-', linewidth=1.5, label='Mean Velocity Magnitude')
+                    ax_vel.fill_between(x_plot_um_vel, mean_v_plot - std_v_plot, mean_v_plot + std_v_plot, color='lightgreen', alpha=0.4, label='Std Dev (Fluctuation)')
+                    
+                    ax_vel.set_xlabel("X-position (µm)")
+                    ax_vel.set_ylabel("Velocity Magnitude (m/s)")
+                    ax_vel.set_title("Mean Proton Velocity Magnitude vs. X-position")
+                    ax_vel.legend(loc='upper right')
+                    ax_vel.grid(True, linestyle=':', alpha=0.7)
+                    ax_vel.set_xlim(0, L_total_sim_um)
+                    ax_vel.set_ylim(bottom=0) # Velocity magnitude is non-negative
+                    
+                    plt.tight_layout()
+                    try:
+                        plt.savefig(output_vel_plot_file, dpi=300)
+                        print(f"Velocity profile plot saved to {output_vel_plot_file}")
+                    except Exception as e:
+                        print(f"Error saving velocity profile plot: {e}")
+                    plt.show()
+                    plt.close(fig_vel)
+                else:
+                    print("No valid binned velocity data to plot.")
+            else:
+                print("No velocity data points fall within the simulation's x-coordinate range.")
+        else:
+            print("No valid velocity data to plot after cleaning.")
+    else:
+        print("No velocity data calculated to generate a profile plot.")
+
 
 if __name__ == "__main__":
     cli_folder_path = None

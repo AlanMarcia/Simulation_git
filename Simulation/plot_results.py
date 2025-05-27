@@ -82,19 +82,36 @@ def plot_results(folder_path=None): # Add folder_path argument
     
     # Attempt to load geometry parameters for profile plot, proceed if available
     y_center_gap_idx = None
+    y_center_gap_abs = None # Initialize
     if geo_params:
+        # Try logic for toothed structures first
         y_si_base_h = geo_params.get("y_si_base_height")
-        # Try 'initial_y_teeth_height' first, then 'y_teeth_height' as fallback
-        y_teeth_h_val = geo_params.get("initial_y_teeth_height", geo_params.get("y_teeth_height"))
-        y_vac_gap_thick = geo_params.get("y_vacuum_gap_thick")
+        y_teeth_h_val = geo_params.get("initial_y_teeth_height", geo_params.get("y_teeth_height")) # Try initial, then fallback
+        y_vac_gap_thick_toothed = geo_params.get("y_vacuum_gap_thick")
 
-        if y_si_base_h is not None and y_teeth_h_val is not None and y_vac_gap_thick is not None:
-            y_center_gap_abs = y_si_base_h + y_teeth_h_val + (y_vac_gap_thick / 2.0)
-            # Find the closest y-index
-            y_center_gap_idx = (np.abs(y_coords - y_center_gap_abs)).argmin()
-            print(f"Calculated y-center for profile plot: {y_center_gap_abs:.2f} µm (index: {y_center_gap_idx})")
+        if y_si_base_h is not None and y_teeth_h_val is not None and y_vac_gap_thick_toothed is not None:
+            y_center_gap_abs = y_si_base_h + y_teeth_h_val + (y_vac_gap_thick_toothed / 2.0)
+            print(f"Using toothed geometry logic for profile plot y-center.")
         else:
-            print("Warning: Could not determine vacuum gap center from geometry parameters. Profile plot will be skipped.")
+            # Fallback logic for "geometria_piana" or simpler structures
+            print("Toothed geometry parameters not fully found. Trying 'geometria_piana' logic for profile plot y-center.")
+            y_si_layer_thick_piana = geo_params.get("y_si_layer_thick") 
+            y_vacuum_gap_thick_piana = geo_params.get("y_vacuum_gap_thick") # This might be the same key as above
+
+            if y_si_layer_thick_piana is not None and y_vacuum_gap_thick_piana is not None:
+                y_center_gap_abs = y_si_layer_thick_piana + (y_vacuum_gap_thick_piana / 2.0)
+                print(f"Using 'geometria_piana' logic for profile plot y-center.")
+            else:
+                print("Warning: Could not determine vacuum gap center from available geometry parameters (neither toothed nor piana). Profile plot will be skipped.")
+        
+        if y_center_gap_abs is not None:
+            # Find the closest y-index
+            if y_coords is not None and len(y_coords) > 0:
+                y_center_gap_idx = (np.abs(y_coords - y_center_gap_abs)).argmin()
+                print(f"Calculated y-center for profile plot: {y_center_gap_abs:.2f} µm (index: {y_center_gap_idx})")
+            else:
+                print("Warning: y_coords not available for determining profile plot index.")
+                y_center_gap_idx = None # Ensure it's None if y_coords are missing
     else:
         print("Warning: Geometry parameters not loaded. Profile plot will be skipped.")
 
@@ -112,6 +129,10 @@ def plot_results(folder_path=None): # Add folder_path argument
     
     def draw_detailed_outlines(ax, x_coords_mesh, y_coords_mesh, eps_r_data_mesh, threshold, color_style):
         """Draws geometry outlines based on the permittivity map."""
+        if threshold is None: # If no valid threshold, do not attempt to draw outlines
+            # print("Skipping outlines as threshold is None.")
+            return
+
         # Separate color and linestyle
         # Assuming color_style is like 'w--' or 'k--'
         color = color_style[0]
@@ -127,13 +148,31 @@ def plot_results(folder_path=None): # Add folder_path argument
     X_mesh, Y_mesh = np.meshgrid(x_coords, y_coords)
     
     # Define a threshold for distinguishing silicon from vacuum
-    # Assuming eps_vac = 1.0 and eps_si = 11.7 (typical values from poisson_solver.cpp)
-    eps_vac_assumed = 1.0
-    eps_si_assumed = 11.7 
-    # It's better if eps_si is read from params or passed, but for now, this is a common value.
-    # If 'eps_si' was saved in geometry_params.csv, we could use it:
-    # eps_si_from_params = geo_params.get('eps_si', 11.7) # Example
-    outline_threshold = (eps_vac_assumed + eps_si_assumed) / 2.0
+    # Dynamically calculate based on loaded eps_r data
+    outline_threshold = None
+    if eps_r is not None:
+        unique_eps_values = np.unique(eps_r)
+        unique_eps_values.sort() # Ensure sorted for min/max logic
+        if len(unique_eps_values) >= 2:
+            # Assume the two most extreme values (after sorting) represent vacuum and material
+            val_low = unique_eps_values[0]
+            val_high = unique_eps_values[-1]
+            # Check if these values are reasonably distinct to represent two phases
+            if val_high > val_low + 0.5: # Heuristic: difference must be at least 0.5
+                outline_threshold = (val_low + val_high) / 2.0
+                print(f"Dynamically calculated outline threshold: {outline_threshold:.2f} (from eps_r min/max: {val_low:.2f}, {val_high:.2f})")
+            else:
+                print(f"Warning: Unique permittivity values ({unique_eps_values}) are too close. Could not reliably determine outline threshold.")
+        elif len(unique_eps_values) == 1:
+            print(f"Warning: Permittivity data contains only one unique value ({unique_eps_values[0]:.2f}). No outlines will be drawn.")
+        else: # Should not happen if eps_r is loaded and not empty
+            print("Warning: Could not process permittivity data for outlines.")
+    else:
+        print("Warning: Permittivity data (eps_r) is None. Cannot draw outlines.")
+
+    # eps_vac_assumed = 1.0 # No longer primary method for threshold
+    # eps_si_assumed = 11.7 
+    # outline_threshold = (eps_vac_assumed + eps_si_assumed) / 2.0 # Old method
 
 
     # Plot 1: Electric Potential
@@ -205,7 +244,12 @@ def plot_results(folder_path=None): # Add folder_path argument
     # Vacuum is where eps_r is close to eps_vac_assumed (e.g., < outline_threshold)
     # Mask should be True for non-vacuum regions.
     # eps_r is already (Ny, Nx)
-    mask_not_vacuum = (eps_r >= outline_threshold) 
+    if outline_threshold is not None:
+        mask_not_vacuum = (eps_r >= outline_threshold) 
+    else: # If no threshold, assume all is vacuum for quiver (or handle differently)
+        mask_not_vacuum = np.zeros_like(eps_r, dtype=bool) # No mask, plot everywhere
+        print("Warning: Quiver plot mask could not be determined due to missing outline_threshold. Plotting vectors everywhere.")
+
 
     # Apply mask: set values outside vacuum to NaN so they are not plotted
     Ex_quiver[mask_not_vacuum] = np.nan

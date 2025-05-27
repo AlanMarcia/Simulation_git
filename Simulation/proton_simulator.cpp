@@ -35,6 +35,8 @@ const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
 const double OUTPUT_TIME_INTERVAL_S = 1e-12; // Interval for writing trajectory data (SI)
 // Initial X position will be set in main after loading geometry, in meters
 
+const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 2.0; // If eps_r > this, it's material (vacuum is ~1.0)
+
 // --- Structures ---
 struct Proton {
     int id;          // Unique identifier for the proton
@@ -236,9 +238,9 @@ std::pair<double, double> find_vacuum_channel_from_map(
     double x_search_start_m,     
     double x_search_end_m) {      
 
-    const double EPS_SI_SIM = 11.7;
-    const double EPS_VAC_SIM = 1.0;
-    const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0;
+    // const double EPS_SI_SIM = 11.7; // No longer used directly for threshold
+    const double EPS_VAC_SIM = 1.0; // Used as baseline for vacuum
+    // const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0; // Replaced by REL_PERMITTIVITY_MATERIAL_THRESHOLD logic
 
     int Nx_map = eps_r_map.size();
     if (Nx_map == 0) return {y_coords_m.front() + (y_coords_m.back()-y_coords_m.front())/3.0, y_coords_m.back() - (y_coords_m.back()-y_coords_m.front())/3.0};
@@ -274,7 +276,7 @@ std::pair<double, double> find_vacuum_channel_from_map(
     for (int i = idx_x_start_search; i <= idx_x_end_search; ++i) {
         int j_bottom_material_top_idx = -1; // Index of the highest cell of bottom material
         for (int j = 0; j < Ny_map; ++j) {
-            if (eps_r_map[i][j] >= material_threshold) {
+            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
                 j_bottom_material_top_idx = j;
             } else {
                 break; // First vacuum cell found, so material below ends at j-1 or this is start of domain
@@ -283,7 +285,7 @@ std::pair<double, double> find_vacuum_channel_from_map(
 
         int j_top_material_bottom_idx = -1; // Index of the lowest cell of top material
         for (int j = Ny_map - 1; j >= 0; --j) {
-            if (eps_r_map[i][j] >= material_threshold) {
+            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
                 j_top_material_bottom_idx = j;
             } else {
                 break; // First vacuum cell found from top
@@ -321,29 +323,43 @@ std::pair<double, double> find_vacuum_channel_from_map(
     }
 
     if (!found_any_gap_in_any_column || overall_vac_min_y >= overall_vac_max_y) {
-        std::cerr << "Warning: Could not determine a consistent vacuum channel from epsilon map." << std::endl;
+        // Fallback if no consistent channel found
+        std::cerr << "Warning: Could not determine a consistent vacuum channel from epsilon map in the search range." << std::endl;
         double H_sim_total = y_coords_m.back() - y_coords_m.front();
-        overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0;
+        overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0; // Middle third
         overall_vac_max_y = y_coords_m.back() - H_sim_total / 3.0;
-        std::cout << "Using fallback vacuum channel: [" << overall_vac_min_y << ", " << overall_vac_max_y << "]" << std::endl;
+        std::cout << "Using fallback vacuum channel: [" << overall_vac_min_y * 1e6 << " um, " << overall_vac_max_y * 1e6 << " um]" << std::endl;
+    } else {
+        // Apply a small margin if a valid gap was found and is thick enough
+        double gap_thickness = overall_vac_max_y - overall_vac_min_y;
+        double min_sensible_gap_for_margin = 2.0 * h_grid_m_from_coords; // e.g., 2 grid cells
+        if (gap_thickness > min_sensible_gap_for_margin) {
+            double margin = h_grid_m_from_coords * 0.1; // 10% of grid spacing
+            double new_min_y = overall_vac_min_y + margin;
+            double new_max_y = overall_vac_max_y - margin;
+            // Ensure margin doesn't invalidate a small but valid gap (must be at least half a cell wide after margin)
+            if (new_min_y < new_max_y && (new_max_y - new_min_y) >= (h_grid_m_from_coords * 0.5) ) {
+                overall_vac_min_y = new_min_y;
+                overall_vac_max_y = new_max_y;
+            }
+        }
     }
     
-    double gap_thickness = overall_vac_max_y - overall_vac_min_y;
-    if (gap_thickness > 2.0 * h_grid_m_from_coords) { 
-        overall_vac_min_y += h_grid_m_from_coords * 0.1; 
-        overall_vac_max_y -= h_grid_m_from_coords * 0.1;
-    }
-     if (overall_vac_min_y >= overall_vac_max_y) { 
-        // Revert margin if it made gap invalid
-        overall_vac_min_y -= h_grid_m_from_coords * 0.1;
-        overall_vac_max_y += h_grid_m_from_coords * 0.1;
-        // Clamp to original bounds if necessary
-        if (!found_any_gap_in_any_column) { // If still no gap, use broad fallback
-             double H_sim_total = y_coords_m.back() - y_coords_m.front();
-             overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0;
-             overall_vac_max_y = y_coords_m.back() - H_sim_total / 3.0;
-        }
-     }
+    // The old margin logic is replaced by the clearer block above.
+    // double gap_thickness = overall_vac_max_y - overall_vac_min_y;
+    // if (gap_thickness > 2.0 * h_grid_m_from_coords) { 
+    //     overall_vac_min_y += h_grid_m_from_coords * 0.1; 
+    //     overall_vac_max_y -= h_grid_m_from_coords * 0.1;
+    // }
+    //  if (overall_vac_min_y >= overall_vac_max_y) { 
+    //     overall_vac_min_y -= h_grid_m_from_coords * 0.1;
+    //     overall_vac_max_y += h_grid_m_from_coords * 0.1;
+    //     if (!found_any_gap_in_any_column) { 
+    //          double H_sim_total = y_coords_m.back() - y_coords_m.front();
+    //          overall_vac_min_y = y_coords_m.front() + H_sim_total / 3.0;
+    //          overall_vac_max_y = y_coords_m.back() - H_sim_total / 3.0;
+    //     }
+    //  }
 
     return {overall_vac_min_y, overall_vac_max_y};
 }
@@ -425,11 +441,11 @@ bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
     double permittivity_at_point = eps_r_map[i_idx][j_idx];
 
     // Define a threshold to distinguish silicon from vacuum
-    const double EPS_SI_SIM = 11.7; // Typical relative permittivity of Silicon
-    const double EPS_VAC_SIM = 1.0;  // Relative permittivity of Vacuum
-    const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0;
+    // const double EPS_SI_SIM = 11.7; // No longer used
+    // const double EPS_VAC_SIM = 1.0;  // No longer used directly here for threshold
+    // const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0; // Replaced
 
-    if (permittivity_at_point >= material_threshold) {
+    if (permittivity_at_point >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
         return true; // Proton is in a material region
     }
 
@@ -575,7 +591,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     
     std::vector<Proton> protons(NUM_PROTONS);
     std::mt19937 rng(std::random_device{}()); // Corrected initialization
-    std::uniform_real_distribution<double> dist_y(20e-6,35e-6); // y in meters
+    std::uniform_real_distribution<double> dist_y(20e-6,30e-6); // y in meters
 
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
