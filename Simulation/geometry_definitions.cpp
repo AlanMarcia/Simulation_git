@@ -60,7 +60,7 @@ void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificPa
     config.L_total = 320.0;
     config.x_free_space = 10.0;
     config.x_structure_len = 300.0;
-    config.H_total_val = 40.0; // Example H_total for denti uguali
+    config.H_total_val = 50.0; // Example H_total for denti uguali
     config.current_tolerance = 1e-5;
     config.current_eps_material = eps_si;
     config.eps_vacuum_val = eps_vac;
@@ -69,7 +69,7 @@ void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificPa
     du_params.y_tooth_height = 5.0;
     du_params.x_tooth_width = 10.0;
     du_params.x_spacing_width = 10.0; // Spacing between teeth
-    du_params.y_vacuum_gap_thick = 10.0;
+    du_params.y_vacuum_gap_thick = 20.0;
 }
 
 PointMaterialInfo get_denti_point_x_info(double x_target_rel, double total_struct_len,
