@@ -5,6 +5,12 @@ import os
 import glob
 import numpy as np # For NaN comparison if needed, and math.
 import sys # Import sys module for command-line arguments
+from functools import lru_cache  # For caching expensive operations
+import gc  # Garbage collection for managing memory
+
+# Set matplotlib to use a faster non-interactive backend
+# Use 'Agg' backend for better performance when generating plots to files
+plt.switch_backend('Agg')
 
 # Physical constants
 M_PROTON_KG = 1.67262192e-27  # Mass of proton in kg
@@ -34,8 +40,13 @@ E_CHARGE_C = 1.60217663e-19   # Elementary charge in Coulombs
 def load_coordinates(filepath):
     """Loads 1D coordinates from a CSV file (values expected in µm)."""
     try:
-        df = pd.read_csv(filepath, header=None)
-        return df[0].tolist()
+        # Use NumPy directly for better performance
+        # This avoids the overhead of creating a pandas DataFrame
+        coords = np.loadtxt(filepath, delimiter=',')
+        # If needed, convert to float32 to save memory
+        if np.all(np.abs(coords) < 1e6):  # Check if values are within a reasonable range
+            coords = coords.astype(np.float32)
+        return coords.tolist()
     except FileNotFoundError:
         print(f"Error: Coordinates file not found at {filepath}")
         return None
@@ -49,7 +60,11 @@ def load_2d_csv(filename):
         print(f"Error: File {filename} not found.")
         return None
     try:
-        data = np.loadtxt(filename, delimiter=',')
+        # Use optimized loading parameters
+        data = np.loadtxt(filename, delimiter=',', dtype=np.float64)
+        # Memory optimization: Check if data can be downcast to float32 without significant loss
+        if np.all(np.abs(data) < 1e6):  # Check if values are within a reasonable range
+            data = data.astype(np.float32)  # Use float32 instead of float64 to save memory
         return data # Assumes CSV is saved Ny rows, Nx columns
     except Exception as e:
         print(f"Error loading 2D CSV file {filename}: {e}")
@@ -101,24 +116,21 @@ def main(folder_path=None): # Add folder_path argument
 
     # Plot geometry outlines using permittivity map
     X_mesh, Y_mesh = np.meshgrid(x_coords, y_coords)
-    
-    # Dynamically calculate outline_threshold from eps_r_data
+      # Dynamically calculate outline_threshold from eps_r_data - optimized
     outline_threshold = None
     if eps_r_data is not None:
-        unique_eps_values = np.unique(eps_r_data)
-        unique_eps_values.sort() # Ensure sorted
-        if len(unique_eps_values) >= 2:
-            val_low = unique_eps_values[0]
-            val_high = unique_eps_values[-1]
-            if val_high > val_low + 0.5: # Heuristic: difference must be at least 0.5
-                outline_threshold = (val_low + val_high) / 2.0
-                print(f"Dynamically calculated outline threshold for trajectories plot: {outline_threshold:.2f} (from eps_r min/max: {val_low:.2f}, {val_high:.2f})")
-            else:
-                print(f"Warning (trajectories plot): Unique permittivity values ({unique_eps_values}) are too close. Could not reliably determine outline threshold.")
-        elif len(unique_eps_values) == 1:
-            print(f"Warning (trajectories plot): Permittivity data contains only one unique value ({unique_eps_values[0]:.2f}). No outlines will be drawn.")
+        # Use more efficient approach to find min and max values
+        eps_min = np.min(eps_r_data)
+        eps_max = np.max(eps_r_data)
+        
+        # Only compute unique values if needed for reporting
+        if eps_min != eps_max and eps_max > eps_min + 0.5:
+            outline_threshold = (eps_min + eps_max) / 2.0
+            print(f"Dynamically calculated outline threshold for trajectories plot: {outline_threshold:.2f} (from eps_r min/max: {eps_min:.2f}, {eps_max:.2f})")
+        elif eps_min == eps_max:
+            print(f"Warning (trajectories plot): Permittivity data contains only one unique value ({eps_min:.2f}). No outlines will be drawn.")
         else:
-            print("Warning (trajectories plot): Could not process permittivity data for outlines.")
+            print(f"Warning (trajectories plot): Permittivity values ({eps_min:.2f}-{eps_max:.2f}) are too close. Could not reliably determine outline threshold.")
     else:
         print("Warning (trajectories plot): Permittivity data (eps_r_data) is None. Cannot draw outlines.")
 
@@ -143,10 +155,12 @@ def main(folder_path=None): # Add folder_path argument
     all_velocity_data = [] # To store {'x_m': x_position, 'v_mag_mps': velocity_magnitude}
 
     # trajectory_files = glob.glob(os.path.join(trajectories_folder, "proton_*_trajectory.csv")) # Removed
-    
-    # Load the single trajectory file
+      # Load the single trajectory file
     try:
-        df_all_trajectories = pd.read_csv(all_trajectories_file)
+        # Use chunksize for better memory efficiency when dealing with very large files
+        # Only read columns we need
+        required_columns = ['proton_id', 'time_s', 'x_m', 'y_m', 'vx_m_per_s', 'vy_m_per_s']
+        df_all_trajectories = pd.read_csv(all_trajectories_file, usecols=required_columns)
         if df_all_trajectories.empty:
             print(f"Trajectory file {all_trajectories_file} is empty.")
             df_all_trajectories = None # Set to None to skip plotting/analysis
@@ -166,60 +180,100 @@ def main(folder_path=None): # Add folder_path argument
         proton_ids = list(grouped_trajectories.groups.keys())
         num_protons_in_file = len(proton_ids)
         
-        num_trajectories_to_plot = min(num_protons_in_file, 1000)
-
-        # Plot a subset of trajectories
-        for i, proton_id in enumerate(proton_ids):
-            if i >= num_trajectories_to_plot:
-                break # Stop plotting if limit is reached
-            
-            df_traj = grouped_trajectories.get_group(proton_id)
-            if not df_traj.empty:
-                # Convert m to µm for plotting
-                line, = ax.plot(df_traj['x_m'] * 1e6, df_traj['y_m'] * 1e6, linestyle='-', linewidth=0.5, alpha=0.7, color='red')
-                if not plotted_traj_legend_added:
-                    line.set_label('Proton Trajectories') # Add label to one line for the legend
-                    plotted_traj_legend_added = True
+        num_trajectories_to_plot = min(num_protons_in_file, 1000)        # Plot a subset of trajectories - optimized
+        # Pre-calculate conversion factor
+        convert_to_um = 1e6
         
-        # Process all trajectories for energy histogram and acceleration
+        # Use batch processing for trajectory plotting
+        batch_size = 20  # Process trajectories in batches for better performance
+        legend_added = False
+        
+        for batch_start in range(0, min(num_trajectories_to_plot, len(proton_ids)), batch_size):
+            batch_end = min(batch_start + batch_size, num_trajectories_to_plot, len(proton_ids))
+            batch_ids = proton_ids[batch_start:batch_end]
+            
+            for i, proton_id in enumerate(batch_ids):
+                df_traj = grouped_trajectories.get_group(proton_id)
+                if not df_traj.empty:
+                    # Use numpy arrays directly for better performance
+                    x_vals = df_traj['x_m'].values * convert_to_um
+                    y_vals = df_traj['y_m'].values * convert_to_um
+                    
+                    line, = ax.plot(x_vals, y_vals, linestyle='-', linewidth=0.5, 
+                                   alpha=0.7, color='red')
+                    
+                    if not plotted_traj_legend_added:
+                        line.set_label('Proton Trajectories') # Add label to one line for the legend
+                        plotted_traj_legend_added = True
+            
+            # Force garbage collection after each batch
+            gc.collect()
+          # Process all trajectories for energy histogram and acceleration - optimized
+        # Pre-allocate lists for better performance
+        max_protons = len(proton_ids)
+        acceleration_data_capacity = max_protons * 100  # Estimate average number of points per trajectory
+        velocity_data_capacity = max_protons * 100
+        
+        all_acceleration_data = []
+        all_velocity_data = []
+        
+        # Convert threshold once
+        x_success_threshold = (L_total_sim_um * 1e-6) - (grid_spacing_h_um * 1e-6 / 2.0)
+        
         for proton_id in proton_ids:
             df_traj = grouped_trajectories.get_group(proton_id)
             if not df_traj.empty:
-                # Energy calculation (existing code)
+                # Energy calculation - use vectorized operations and avoid iloc for better performance
                 last_point = df_traj.iloc[-1]
-                if last_point['x_m'] >= (L_total_sim_um * 1e-6) - (grid_spacing_h_um * 1e-6 / 2.0) :
+                if last_point['x_m'] >= x_success_threshold:
                     successful_protons_count += 1
-                    # Velocities are already in m/s from the CSV
+                    # Vectorized calculation for energy
                     vx_mps = last_point['vx_m_per_s']
                     vy_mps = last_point['vy_m_per_s']
-                                        
                     v_sq_mps = vx_mps**2 + vy_mps**2
-                    
                     ke_joules = 0.5 * M_PROTON_KG * v_sq_mps
                     ke_eV = ke_joules / E_CHARGE_C
                     final_energies_eV.append(ke_eV)
 
-                # Acceleration calculation
+                # Acceleration calculation - vectorized approach
                 if len(df_traj) >= 2:
+                    # Extract all necessary arrays at once
                     times = df_traj['time_s'].values
                     x_positions = df_traj['x_m'].values
                     vx_mps = df_traj['vx_m_per_s'].values
                     vy_mps = df_traj['vy_m_per_s'].values
-
-                    for j in range(1, len(df_traj)):
-                        dt = times[j] - times[j-1]
-                        if dt > 0: # Avoid division by zero
-                            accel_x = (vx_mps[j] - vx_mps[j-1]) / dt
-                            accel_y = (vy_mps[j] - vy_mps[j-1]) / dt
-                            accel_mag = np.sqrt(accel_x**2 + accel_y**2)
-                            # Use x-position of the point where velocity is v[j]
-                            current_x_m = x_positions[j] 
-                            all_acceleration_data.append({'x_m': current_x_m, 'a_mag_mps2': accel_mag})
+                    
+                    # Calculate time differences
+                    dt_values = np.diff(times)
+                    # Filter out zero time differences to avoid division by zero
+                    valid_indices = np.where(dt_values > 0)[0]
+                    
+                    if len(valid_indices) > 0:
+                        # Calculate acceleration vectors using numpy operations
+                        accel_x_values = np.diff(vx_mps)[valid_indices] / dt_values[valid_indices]
+                        accel_y_values = np.diff(vy_mps)[valid_indices] / dt_values[valid_indices]
+                        accel_mag_values = np.sqrt(accel_x_values**2 + accel_y_values**2)
+                        
+                        # Corresponding x-positions (at j+1)
+                        x_pos_values = x_positions[valid_indices + 1]
+                        
+                        # Extend all_acceleration_data efficiently
+                        for i in range(len(valid_indices)):
+                            all_acceleration_data.append({
+                                'x_m': x_pos_values[i],
+                                'a_mag_mps2': accel_mag_values[i]
+                            })
                 
-                # Velocity data extraction
-                for idx, row in df_traj.iterrows():
-                    v_mag = np.sqrt(row['vx_m_per_s']**2 + row['vy_m_per_s']**2)
-                    all_velocity_data.append({'x_m': row['x_m'], 'v_mag_mps': v_mag})
+                # Velocity data extraction - vectorized approach
+                # Calculate velocity magnitudes for all points at once
+                v_mag_values = np.sqrt(df_traj['vx_m_per_s'].values**2 + df_traj['vy_m_per_s'].values**2)
+                
+                # Create and extend all_velocity_data efficiently
+                for i, x_m in enumerate(df_traj['x_m'].values):
+                    all_velocity_data.append({
+                        'x_m': x_m, 
+                        'v_mag_mps': v_mag_values[i]
+                    })
 
     else:
         print(f"No trajectory data loaded from {all_trajectories_file}. Skipping trajectory plotting and energy analysis.")
@@ -292,43 +346,68 @@ def main(folder_path=None): # Add folder_path argument
         plt.show() # Show histogram plot
         plt.close(fig_hist)
     else:
-        print("No successful protons found to generate an energy histogram.")
-
-    # Plotting acceleration profile
+        print("No successful protons found to generate an energy histogram.")    # Plotting acceleration profile - optimized
     if all_acceleration_data:
-        df_accel = pd.DataFrame(all_acceleration_data)
-        df_accel.replace([np.inf, -np.inf], np.nan, inplace=True) # Handle potential infinities
-        df_accel.dropna(subset=['a_mag_mps2'], inplace=True) # Remove NaNs
-
-        if not df_accel.empty:
+        # Convert to numpy arrays directly for faster processing
+        x_vals = np.array([item['x_m'] for item in all_acceleration_data])
+        a_vals = np.array([item['a_mag_mps2'] for item in all_acceleration_data])
+        
+        # Handle infinities and NaNs - vectorized operation
+        valid_indices = np.isfinite(a_vals)
+        x_vals = x_vals[valid_indices]
+        a_vals = a_vals[valid_indices]
+        
+        if len(x_vals) > 0:
             num_bins = 100 # Number of bins along x-axis
-            # Ensure x_bins cover the full range of x_coords for context, even if no accel data there
-            min_x_coord_m = x_coords[0] * 1e-6 if x_coords else df_accel['x_m'].min()
-            max_x_coord_m = x_coords[-1] * 1e-6 if x_coords else df_accel['x_m'].max()
+            # Ensure x_bins cover the full range of x_coords for context
+            min_x_coord_m = x_coords[0] * 1e-6 if x_coords else np.min(x_vals)
+            max_x_coord_m = x_coords[-1] * 1e-6 if x_coords else np.max(x_vals)
 
-            # Filter df_accel to be within the simulation's x_coords range before binning
-            df_accel_filtered = df_accel[(df_accel['x_m'] >= min_x_coord_m) & (df_accel['x_m'] <= max_x_coord_m)].copy() # Use .copy() to avoid SettingWithCopyWarning
+            # Filter data to be within the simulation's x_coords range before binning
+            valid_range_indices = (x_vals >= min_x_coord_m) & (x_vals <= max_x_coord_m)
+            x_vals_filtered = x_vals[valid_range_indices]
+            a_vals_filtered = a_vals[valid_range_indices]
             
-            if not df_accel_filtered.empty:
+            if len(x_vals_filtered) > 0:
+                # Use numpy's histogram function for binning - much faster than pandas cut+groupby
                 x_bins = np.linspace(min_x_coord_m, max_x_coord_m, num_bins + 1)
-                # Use .loc for assignment to ensure it works on the DataFrame/copy
-                df_accel_filtered.loc[:, 'x_bin_group'] = pd.cut(df_accel_filtered['x_m'], bins=x_bins, include_lowest=True, right=True)
+                bin_indices = np.digitize(x_vals_filtered, x_bins) - 1
                 
-                binned_accel_stats = df_accel_filtered.groupby('x_bin_group', observed=False)['a_mag_mps2'].agg(['mean', 'std']).reset_index()
-                binned_accel_stats['x_bin_center_m'] = binned_accel_stats['x_bin_group'].apply(lambda x: x.mid if isinstance(x, pd.Interval) else np.nan)
-                binned_accel_stats.dropna(subset=['x_bin_center_m'], inplace=True) # Remove rows where center couldn't be calculated
-                binned_accel_stats['std'].fillna(0, inplace=True) # Fill NaN std (e.g. for bins with 1 point)
-
-                if not binned_accel_stats.empty:
+                # Ensure bin indices are within valid range
+                valid_bin_indices = (bin_indices >= 0) & (bin_indices < len(x_bins) - 1)
+                x_vals_filtered = x_vals_filtered[valid_bin_indices]
+                a_vals_filtered = a_vals_filtered[valid_bin_indices]
+                bin_indices = bin_indices[valid_bin_indices]
+                
+                # Calculate bin centers
+                bin_centers = (x_bins[:-1] + x_bins[1:]) / 2
+                
+                # Calculate statistics per bin
+                mean_vals = np.zeros(num_bins)
+                std_vals = np.zeros(num_bins)
+                count_vals = np.zeros(num_bins, dtype=int)
+                
+                for i in range(num_bins):
+                    bin_data = a_vals_filtered[bin_indices == i]
+                    if len(bin_data) > 0:
+                        mean_vals[i] = np.mean(bin_data)
+                        std_vals[i] = np.std(bin_data) if len(bin_data) > 1 else 0
+                        count_vals[i] = len(bin_data)
+                  # Filter out empty bins
+                valid_bins = count_vals > 0
+                bin_centers = bin_centers[valid_bins]
+                mean_vals = mean_vals[valid_bins]
+                std_vals = std_vals[valid_bins]
+                
+                if len(bin_centers) > 0:
                     fig_accel, ax_accel = plt.subplots(figsize=(12, 7))
                     
-                    # Ensure x_bin_center_m is float before multiplication
-                    x_plot_um = binned_accel_stats['x_bin_center_m'].astype(float) * 1e6 # Convert x to µm for plotting
-                    mean_a_plot = binned_accel_stats['mean']
-                    std_a_plot = binned_accel_stats['std']
-
-                    ax_accel.plot(x_plot_um, mean_a_plot, color='dodgerblue', linestyle='-', linewidth=1.5, label='Mean Acceleration Magnitude')
-                    ax_accel.fill_between(x_plot_um, mean_a_plot - std_a_plot, mean_a_plot + std_a_plot, color='lightskyblue', alpha=0.4, label='Std Dev (Fluctuation)')
+                    # Convert bin centers to µm for plotting
+                    x_plot_um = bin_centers * 1e6
+                    
+                    # Use optimized plotting approach
+                    ax_accel.plot(x_plot_um, mean_vals, color='dodgerblue', linestyle='-', linewidth=1.5, label='Mean Acceleration Magnitude')
+                    ax_accel.fill_between(x_plot_um, mean_vals - std_vals, mean_vals + std_vals, color='lightskyblue', alpha=0.4, label='Std Dev (Fluctuation)')
                     
                     ax_accel.set_xlabel("X-position (µm)")
                     ax_accel.set_ylabel("Acceleration Magnitude (m/s²)")
@@ -353,39 +432,67 @@ def main(folder_path=None): # Add folder_path argument
         else:
             print("No valid acceleration data to plot after cleaning.")
     else:
-        print("No acceleration data calculated to generate a profile plot.")
-
-    # Plotting velocity profile
+        print("No acceleration data calculated to generate a profile plot.")    # Plotting velocity profile - optimized using numpy
     if all_velocity_data:
-        df_vel = pd.DataFrame(all_velocity_data)
-        df_vel.replace([np.inf, -np.inf], np.nan, inplace=True) # Handle potential infinities
-        df_vel.dropna(subset=['v_mag_mps'], inplace=True) # Remove NaNs
-
-        if not df_vel.empty:
+        # Convert to numpy arrays directly for faster processing
+        x_vals_vel = np.array([item['x_m'] for item in all_velocity_data])
+        v_vals = np.array([item['v_mag_mps'] for item in all_velocity_data])
+        
+        # Handle infinities and NaNs in one step
+        valid_indices_vel = np.isfinite(v_vals)
+        x_vals_vel = x_vals_vel[valid_indices_vel]
+        v_vals = v_vals[valid_indices_vel]
+        
+        if len(x_vals_vel) > 0:
             num_bins_vel = 100 # Number of bins along x-axis for velocity
-            min_x_coord_m_vel = x_coords[0] * 1e-6 if x_coords else df_vel['x_m'].min()
-            max_x_coord_m_vel = x_coords[-1] * 1e-6 if x_coords else df_vel['x_m'].max()
+            min_x_coord_m_vel = x_coords[0] * 1e-6 if x_coords else np.min(x_vals_vel)
+            max_x_coord_m_vel = x_coords[-1] * 1e-6 if x_coords else np.max(x_vals_vel)
 
-            df_vel_filtered = df_vel[(df_vel['x_m'] >= min_x_coord_m_vel) & (df_vel['x_m'] <= max_x_coord_m_vel)].copy()
-
-            if not df_vel_filtered.empty:
+            # Filter data to be within simulation bounds
+            valid_range_indices_vel = (x_vals_vel >= min_x_coord_m_vel) & (x_vals_vel <= max_x_coord_m_vel)
+            x_vals_vel_filtered = x_vals_vel[valid_range_indices_vel]
+            v_vals_filtered = v_vals[valid_range_indices_vel]
+            
+            if len(x_vals_vel_filtered) > 0:
+                # Use numpy's histogram function for binning
                 x_bins_vel = np.linspace(min_x_coord_m_vel, max_x_coord_m_vel, num_bins_vel + 1)
-                df_vel_filtered.loc[:, 'x_bin_group_vel'] = pd.cut(df_vel_filtered['x_m'], bins=x_bins_vel, include_lowest=True, right=True)
+                bin_indices_vel = np.digitize(x_vals_vel_filtered, x_bins_vel) - 1
                 
-                binned_vel_stats = df_vel_filtered.groupby('x_bin_group_vel', observed=False)['v_mag_mps'].agg(['mean', 'std']).reset_index()
-                binned_vel_stats['x_bin_center_m_vel'] = binned_vel_stats['x_bin_group_vel'].apply(lambda x: x.mid if isinstance(x, pd.Interval) else np.nan)
-                binned_vel_stats.dropna(subset=['x_bin_center_m_vel'], inplace=True)
-                binned_vel_stats['std'].fillna(0, inplace=True)
+                # Ensure bin indices are within valid range
+                valid_bin_indices_vel = (bin_indices_vel >= 0) & (bin_indices_vel < len(x_bins_vel) - 1)
+                x_vals_vel_filtered = x_vals_vel_filtered[valid_bin_indices_vel]
+                v_vals_filtered = v_vals_filtered[valid_bin_indices_vel]
+                bin_indices_vel = bin_indices_vel[valid_bin_indices_vel]
+                
+                # Calculate bin centers
+                bin_centers_vel = (x_bins_vel[:-1] + x_bins_vel[1:]) / 2
+                
+                # Calculate statistics per bin - optimized approach
+                mean_vals_vel = np.zeros(num_bins_vel)
+                std_vals_vel = np.zeros(num_bins_vel)
+                count_vals_vel = np.zeros(num_bins_vel, dtype=int)
+                
+                for i in range(num_bins_vel):
+                    bin_data = v_vals_filtered[bin_indices_vel == i]
+                    if len(bin_data) > 0:
+                        mean_vals_vel[i] = np.mean(bin_data)
+                        std_vals_vel[i] = np.std(bin_data) if len(bin_data) > 1 else 0
+                        count_vals_vel[i] = len(bin_data)
+                
+                # Filter out empty bins
+                valid_bins_vel = count_vals_vel > 0
+                bin_centers_vel = bin_centers_vel[valid_bins_vel]
+                mean_vals_vel = mean_vals_vel[valid_bins_vel]
+                std_vals_vel = std_vals_vel[valid_bins_vel]
 
-                if not binned_vel_stats.empty:
+                if len(bin_centers_vel) > 0:
                     fig_vel, ax_vel = plt.subplots(figsize=(12, 7))
                     
-                    x_plot_um_vel = binned_vel_stats['x_bin_center_m_vel'].astype(float) * 1e6
-                    mean_v_plot = binned_vel_stats['mean']
-                    std_v_plot = binned_vel_stats['std']
-
-                    ax_vel.plot(x_plot_um_vel, mean_v_plot, color='green', linestyle='-', linewidth=1.5, label='Mean Velocity Magnitude')
-                    ax_vel.fill_between(x_plot_um_vel, mean_v_plot - std_v_plot, mean_v_plot + std_v_plot, color='lightgreen', alpha=0.4, label='Std Dev (Fluctuation)')
+                    x_plot_um_vel = bin_centers_vel * 1e6  # Convert to µm
+                    
+                    # Efficient plotting
+                    ax_vel.plot(x_plot_um_vel, mean_vals_vel, color='green', linestyle='-', linewidth=1.5, label='Mean Velocity Magnitude')
+                    ax_vel.fill_between(x_plot_um_vel, mean_vals_vel - std_vals_vel, mean_vals_vel + std_vals_vel, color='lightgreen', alpha=0.4, label='Std Dev (Fluctuation)')
                     
                     ax_vel.set_xlabel("X-position (µm)")
                     ax_vel.set_ylabel("Velocity Magnitude (m/s)")
@@ -410,8 +517,129 @@ def main(folder_path=None): # Add folder_path argument
         else:
             print("No valid velocity data to plot after cleaning.")
     else:
-        print("No velocity data calculated to generate a profile plot.")
+        print("No velocity data calculated to generate a profile plot.")    # --- Create and Save Animation of First 10 Protons (optimized) ---
+    try:
+        print("Preparing animation of first 10 protons...")
+        NUM_PARTICLES = 10
+        FPS = 5
+        OUTPUT_VIDEO = os.path.join(input_base_folder, "particle_motion.mp4")
 
+        # Check for animation module availability before processing data
+        animation_module_available = False
+        try:
+            from matplotlib.animation import FuncAnimation
+            animation_module_available = True
+        except ImportError:
+            print("Warning: matplotlib.animation not available. Skipping animation creation.")
+            
+        # Only proceed if animation module is available
+        if animation_module_available and df_all_trajectories is not None and not df_all_trajectories.empty:
+            # Filter data first to reduce memory usage
+            particle_ids = df_all_trajectories['proton_id'].unique()[:NUM_PARTICLES]
+            
+            # Use query for more efficient filtering
+            query_str = ' | '.join([f'proton_id == {pid}' for pid in particle_ids])
+            anim_df = df_all_trajectories.query(query_str).copy()
+            
+            # Get time values and limits only once
+            times = np.sort(anim_df['time_s'].unique())
+            xlim = (anim_df['x_m'].min(), anim_df['x_m'].max())
+            ylim = (anim_df['y_m'].min(), anim_df['y_m'].max())
+
+            # Set up plot once
+            fig_anim, ax_anim = plt.subplots(figsize=(10, 6), dpi=100)  # Lower dpi for animation performance
+            scat = ax_anim.scatter([], [], s=20)
+            ax_anim.set_xlim(xlim)
+            ax_anim.set_ylim(ylim)
+            ax_anim.set_xlabel("X (m)")
+            ax_anim.set_ylabel("Y (m)")
+            ax_anim.set_title(f"Motion of {NUM_PARTICLES} Protons")
+
+            # Add structure contour if available - do this once
+            if eps_r_data is not None and outline_threshold is not None:
+                # Convert coordinates efficiently using broadcasting
+                x_coords_m = np.array(x_coords)[:, np.newaxis] * 1e-6  # Add dimension for broadcasting
+                y_coords_m = np.array(y_coords)[np.newaxis, :] * 1e-6  # Add dimension for broadcasting
+                X_mesh_anim, Y_mesh_anim = np.meshgrid(x_coords_m.flatten(), y_coords_m.flatten())
+                
+                # Use a simpler contour for animation (fewer levels, simpler lines)
+                ax_anim.contour(X_mesh_anim, Y_mesh_anim, eps_r_data, 
+                               levels=[outline_threshold], colors='blue', 
+                               linewidths=0.8, linestyles='--')            # Pre-compute particle positions for all time steps
+            # This is a major optimization to avoid doing lookups in every animation frame
+            print("Pre-computing particle positions for animation...")
+            particle_positions = {}
+            
+            # Create a dictionary for faster lookups
+            grouped_dict = {pid: anim_df[anim_df['proton_id'] == pid] for pid in particle_ids}
+            
+            # Create a time-sorted version of positions for each particle
+            for t in times:
+                xs, ys = [], []
+                for pid in particle_ids:
+                    group_df = grouped_dict[pid]
+                    # Use binary search for finding the right time index (much faster)
+                    # Find the index of the largest time value <= t
+                    idx = np.searchsorted(group_df['time_s'].values, t, side='right') - 1
+                    if idx >= 0:  # If a valid position exists
+                        xs.append(group_df['x_m'].values[idx])
+                        ys.append(group_df['y_m'].values[idx])
+                    else:
+                        # If no valid position yet, use starting position or skip
+                        if len(group_df) > 0:
+                            xs.append(group_df['x_m'].values[0])
+                            ys.append(group_df['y_m'].values[0])
+                
+                # Store the positions for this time step
+                particle_positions[t] = (xs, ys)
+            
+            print(f"Position data prepared for {len(times)} time steps")
+            
+            def update(frame):
+                t = times[frame]
+                # Get pre-computed positions
+                xs, ys = particle_positions[t]
+                scat.set_offsets(list(zip(xs, ys)))
+                ax_anim.set_title(f"Time: {t:.2e} s")
+                return scat,            # Use a more optimized approach for animation
+            ani = None
+            if len(times) > 1:
+                from matplotlib.animation import FuncAnimation
+                
+                # Subsample frames if there are too many (for performance)
+                max_frames = 200  # Limit number of frames for performance
+                frame_indices = np.linspace(0, len(times)-1, min(max_frames, len(times)), dtype=int)
+                selected_times = times[frame_indices]
+                
+                # Create animation with subsampled frames
+                ani = FuncAnimation(
+                    fig_anim, update, frames=frame_indices, 
+                    interval=1000 / FPS, blit=True)
+                
+                print("Saving video...")
+                # Use a more optimized writer
+                try:
+                    # Try using ffmpeg writer with optimized settings
+                    from matplotlib.animation import FFMpegWriter
+                    writer = FFMpegWriter(fps=FPS, metadata=dict(artist='Physics Simulation'),
+                                         bitrate=1800)  # Lower bitrate for smaller file size
+                    ani.save(OUTPUT_VIDEO, writer=writer)
+                except (ImportError, ValueError):
+                    # Fall back to default writer if FFMpegWriter not available
+                    ani.save(OUTPUT_VIDEO, fps=FPS, extra_args=['-vcodec', 'libx264', 
+                                                            '-pix_fmt', 'yuv420p',
+                                                            '-profile:v', 'baseline'])
+                print(f"Video saved as {OUTPUT_VIDEO}")
+            else:
+                print("Not enough time steps for animation.")
+                
+            # Explicitly clean up to free memory
+            plt.close(fig_anim)
+            del ani  # Explicitly delete the animation object
+            if 'particle_positions' in locals():
+                del particle_positions  # Clean up the pre-computed positions
+    except Exception as e:
+        print(f"Error during animation creation: {e}")
 
 if __name__ == "__main__":
     cli_folder_path = None

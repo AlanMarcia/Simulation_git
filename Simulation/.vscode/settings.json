@@ -57,6 +57,7 @@
         "xmemory": "cpp",
         "xstring": "cpp",
         "xtr1common": "cpp",
-        "xutility": "cpp"
+        "xutility": "cpp",
+        "plot_trajectories_root.C": "cpp"
     }
 }

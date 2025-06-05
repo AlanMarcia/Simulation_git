@@ -26,7 +26,7 @@ void initializePianaGeometry(GeometryConfig& config, PianaSpecificParams& piana_
     config.x_free_space = 10.0;
     config.x_structure_len = 300.0;
     config.H_total_val = 30.0;
-    config.current_tolerance = 1e-4;
+    config.current_tolerance = 1e-3;
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
 
@@ -34,14 +34,13 @@ void initializePianaGeometry(GeometryConfig& config, PianaSpecificParams& piana_
     piana_params.y_vacuum_gap_thick = 10.0;
 }
 
-void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_si, double eps_vac) {
+void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
     config.L_total = 320.0;
     config.x_free_space = 10.0;
-    config.x_structure_len = 300.0;
-    config.H_total_val = 50.0; // Altezza maggiore per i denti
+    config.x_structure_len = 300.0;    config.H_total_val = 50.0; // Altezza maggiore per i denti
     config.current_tolerance = 1e-5;
-    config.current_eps_material = eps_si;
+    config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
 
     denti_params.y_si_base_height = 10.0;
@@ -55,14 +54,13 @@ void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasati
     denti_params.y_vacuum_gap_thick = 10.0;
 }
 
-void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificParams& du_params, double common_h, double eps_si, double eps_vac) {
+void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificParams& du_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
     config.L_total = 320.0;
     config.x_free_space = 10.0;
-    config.x_structure_len = 300.0;
-    config.H_total_val = 50.0; // Example H_total for denti uguali
+    config.x_structure_len = 300.0;    config.H_total_val = 50.0; // Example H_total for denti uguali
     config.current_tolerance = 1e-5;
-    config.current_eps_material = eps_si;
+    config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
 
     du_params.y_si_base_height = 10.0;

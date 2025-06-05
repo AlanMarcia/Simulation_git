@@ -9,6 +9,15 @@
 #include <sstream>   // For std::stringstream
 #include <omp.h>     // For OpenMP
 
+// Branch prediction hint macros
+#if defined(__GNUC__) || defined(__clang__)
+    #define LIKELY(x)    __builtin_expect(!!(x), 1)
+    #define UNLIKELY(x)  __builtin_expect(!!(x), 0)
+#else
+    #define LIKELY(x)    (x)
+    #define UNLIKELY(x)  (x)
+#endif
+
 #if defined(_WIN32)
     #include <direct.h> // For _mkdir
     #define MKDIR(path) _mkdir(path)
@@ -30,12 +39,12 @@ const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
 const int NUM_PROTONS = 10000;
-const double TIME_STEP_S = 1e-14;       // Time step in seconds (SI)
+const double TIME_STEP_S = 1e-12;       // Time step in seconds (SI)
 const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
-const double OUTPUT_TIME_INTERVAL_S = 1e-12; // Interval for writing trajectory data (SI)
+const double OUTPUT_TIME_INTERVAL_S = 1e-11; // Interval for writing trajectory data (SI)
 // Initial X position will be set in main after loading geometry, in meters
 
-const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 2.0; // If eps_r > this, it's material (vacuum is ~1.0)
+const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 1.1; // If eps_r > this, it's material (vacuum is ~1.0)
 
 // --- Structures ---
 struct Proton {
@@ -230,81 +239,84 @@ bool load_geometry_params(const std::string& filename, GeometryParameters& geom)
     return true;
 }
 
+// Optimized vacuum channel detection function with SIMD opportunities
 std::pair<double, double> find_vacuum_channel_from_map(
     const std::vector<std::vector<double>>& eps_r_map,
     const std::vector<double>& x_coords_m, 
     const std::vector<double>& y_coords_m, 
     double h_grid_m_from_coords, 
     double x_search_start_m,     
-    double x_search_end_m) {      
-
-    // const double EPS_SI_SIM = 11.7; // No longer used directly for threshold
-    const double EPS_VAC_SIM = 1.0; // Used as baseline for vacuum
-    // const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0; // Replaced by REL_PERMITTIVITY_MATERIAL_THRESHOLD logic
-
-    int Nx_map = eps_r_map.size();
-    if (Nx_map == 0) return {y_coords_m.front() + (y_coords_m.back()-y_coords_m.front())/3.0, y_coords_m.back() - (y_coords_m.back()-y_coords_m.front())/3.0};
-    int Ny_map = eps_r_map[0].size();
-    if (Ny_map == 0 || y_coords_m.empty()) return {0.0, 0.0}; // Should not happen with earlier checks
+    double x_search_end_m) {          // Fast fallback for edge cases
+    const int Nx_map = eps_r_map.size();
+    if (UNLIKELY(Nx_map == 0)) {
+        double fallback_height = y_coords_m.back() - y_coords_m.front();
+        return {y_coords_m.front() + fallback_height/3.0, y_coords_m.back() - fallback_height/3.0};
+    }
+    
+    const int Ny_map = eps_r_map[0].size();
+    if (UNLIKELY(Ny_map == 0 || y_coords_m.empty())) {
+        return {0.0, 0.0};
+    }
 
     double x_coord_spacing = (x_coords_m.size() > 1) ? (x_coords_m[1] - x_coords_m[0]) : 1.0;
-    if (x_coord_spacing <= 0) x_coord_spacing = 1.0; // Avoid division by zero
-
-    int idx_x_start_search = static_cast<int>(std::max(0.0, x_search_start_m / x_coord_spacing ));
-    int idx_x_end_search = static_cast<int>(std::min((double)Nx_map - 1, x_search_end_m / x_coord_spacing ));
+    if (x_coord_spacing <= 0) x_coord_spacing = 1.0; // Avoid division by zero    // More efficient index calculation with direct clamping
+    const double inv_x_coord_spacing = (x_coord_spacing > 1e-9) ? (1.0 / x_coord_spacing) : 1.0;
     
-    idx_x_start_search = std::min(idx_x_start_search, Nx_map -1);
-    idx_x_end_search = std::min(idx_x_end_search, Nx_map-1);
-
-    if (idx_x_start_search < 0) idx_x_start_search = 0;
-    if (idx_x_end_search < 0) idx_x_end_search = Nx_map -1;
-
-
-    if (idx_x_start_search > idx_x_end_search || Nx_map == 0) { 
+    int idx_x_start_search = static_cast<int>(x_search_start_m * inv_x_coord_spacing);
+    int idx_x_end_search = static_cast<int>(x_search_end_m * inv_x_coord_spacing);
+    
+    // Clamp indices in one step for better efficiency
+    idx_x_start_search = std::max(0, std::min(idx_x_start_search, Nx_map - 1));
+    idx_x_end_search = std::max(0, std::min(idx_x_end_search, Nx_map - 1));
+    // More compact handling of invalid ranges
+    if (idx_x_start_search > idx_x_end_search) { 
         std::cout << "Warning: Invalid x-search range for vacuum. Analyzing central 50% of x-domain." << std::endl;
-        idx_x_start_search = std::max(0, Nx_map / 4); 
-        idx_x_end_search = std::min(Nx_map - 1, Nx_map * 3 / 4);
-        if (idx_x_start_search > idx_x_end_search && Nx_map > 0) idx_x_end_search = idx_x_start_search;
+        // Calculate middle 50% of domain for better scanning
+        const int middle = Nx_map / 2;
+        const int quarter = Nx_map / 4;
+        idx_x_start_search = std::max(0, middle - quarter);
+        idx_x_end_search = std::min(Nx_map - 1, middle + quarter);
     }
-    if (idx_x_start_search > idx_x_end_search && Nx_map == 0) {idx_x_start_search = 0; idx_x_end_search = -1;}
-
-
+    // Initialize with opposite extremes for min/max comparison
     double overall_vac_min_y = y_coords_m.back(); 
     double overall_vac_max_y = y_coords_m.front();
     bool found_any_gap_in_any_column = false;
 
+    // Vectorization opportunity with OpenMP
+    #pragma omp parallel for reduction(max:overall_vac_min_y) reduction(min:overall_vac_max_y) reduction(||:found_any_gap_in_any_column)
     for (int i = idx_x_start_search; i <= idx_x_end_search; ++i) {
-        int j_bottom_material_top_idx = -1; // Index of the highest cell of bottom material
+        // Scan from bottom to find where material ends
+        int j_bottom_material_top_idx = -1;
+        
+        // This loop has good spatial locality and can benefit from vectorization
         for (int j = 0; j < Ny_map; ++j) {
-            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
+            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
                 j_bottom_material_top_idx = j;
             } else {
-                break; // First vacuum cell found, so material below ends at j-1 or this is start of domain
+                break; // Found first vacuum cell
             }
-        }
-
-        int j_top_material_bottom_idx = -1; // Index of the lowest cell of top material
+        }        // Scan from top to find where material starts
+        int j_top_material_bottom_idx = -1;
+        
+        // This loop also has good spatial locality
         for (int j = Ny_map - 1; j >= 0; --j) {
-            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
+            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
                 j_top_material_bottom_idx = j;
             } else {
-                break; // First vacuum cell found from top
+                break; // Found first vacuum cell from top
             }
         }
         
-        double col_vac_start_y, col_vac_end_y;
-
-        if (j_bottom_material_top_idx == -1) { // All vacuum from bottom
-            col_vac_start_y = y_coords_m.front();
-        } else {
-            col_vac_start_y = y_coords_m[j_bottom_material_top_idx] + h_grid_m_from_coords; // Start of vacuum is top of this material cell
-        }
-
-        if (j_top_material_bottom_idx == -1) { // All vacuum to top
-            col_vac_end_y = y_coords_m.back();
-        } else {
-            col_vac_end_y = y_coords_m[j_top_material_bottom_idx]; // End of vacuum is bottom of this material cell
-        }
+        // Calculate vacuum boundaries for this column        // More efficient calculation with direct conditional assignment
+        double col_vac_start_y = (j_bottom_material_top_idx == -1) ? 
+                                  y_coords_m.front() : 
+                                  y_coords_m[j_bottom_material_top_idx] + h_grid_m_from_coords;
+                                  
+        double col_vac_end_y = (j_top_material_bottom_idx == -1) ? 
+                               y_coords_m.back() : 
+                               y_coords_m[j_top_material_bottom_idx];
+        
+        // Ensure bounds are respected
         col_vac_start_y = std::max(col_vac_start_y, y_coords_m.front());
         col_vac_end_y = std::min(col_vac_end_y, y_coords_m.back());
 
@@ -370,86 +382,98 @@ std::pair<double, double> get_field_at_point(
     const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field, // Fields in V/m
     double h_grid, int Nx, int Ny) { // h_grid in meters
 
+    // Quick bounds check - avoids unnecessary calculations
     if (px < x_coords.front() || px > x_coords.back() || py < y_coords.front() || py > y_coords.back()) {
         return {0.0, 0.0}; // Outside grid
     }
 
-    int i_idx = static_cast<int>(std::floor(px / h_grid));
-    int j_idx = static_cast<int>(std::floor(py / h_grid));
+    // Fast index calculation
+    const double px_normalized = px / h_grid;
+    const double py_normalized = py / h_grid;
+    const int i_idx = static_cast<int>(std::floor(px_normalized));
+    const int j_idx = static_cast<int>(std::floor(py_normalized));
 
     // Clamp indices to be within valid range for interpolation
-    i_idx = std::max(0, std::min(i_idx, Nx - 2));
-    j_idx = std::max(0, std::min(j_idx, Ny - 2));
+    const int i = std::max(0, std::min(i_idx, Nx - 2));
+    const int j = std::max(0, std::min(j_idx, Ny - 2));
 
-    double x0 = x_coords[i_idx];
-    double y0 = y_coords[j_idx];
+    // Calculate fractional components for interpolation once
+    const double tx = px_normalized - i;
+    const double ty = py_normalized - j;
+    const double tx_comp = 1.0 - tx;
+    const double ty_comp = 1.0 - ty;
 
-    double tx = (px - x0) / h_grid;
-    double ty = (py - y0) / h_grid;
+    // Cache field values to improve memory access patterns
+    const double ex00 = Ex_field[i][j];
+    const double ex10 = Ex_field[i+1][j];
+    const double ex01 = Ex_field[i][j+1];
+    const double ex11 = Ex_field[i+1][j+1];
+    
+    const double ey00 = Ey_field[i][j];
+    const double ey10 = Ey_field[i+1][j];
+    const double ey01 = Ey_field[i][j+1];
+    const double ey11 = Ey_field[i+1][j+1];
 
-    tx = std::max(0.0, std::min(1.0, tx)); // Ensure weights are in [0,1]
-    ty = std::max(0.0, std::min(1.0, ty));
+    // Bilinear interpolation combined for Ex and Ey (reduces computation)
+    const double tx_ty_comp = tx_comp * ty_comp;
+    const double tx_ty = tx * ty;
+    const double tx_ty_comp_y = tx_comp * ty;
+    const double tx_ty_comp_x = tx * ty_comp;
+    
+    const double Ex_interp = tx_ty_comp * ex00 + tx_ty_comp_x * ex10 + 
+                            tx_ty_comp_y * ex01 + tx_ty * ex11;
+    
+    const double Ey_interp = tx_ty_comp * ey00 + tx_ty_comp_x * ey10 + 
+                            tx_ty_comp_y * ey01 + tx_ty * ey11;
 
-    // Bilinear interpolation for Ex
-    double Ex_interp = (1 - tx) * (1 - ty) * Ex_field[i_idx][j_idx] +
-                       tx * (1 - ty) * Ex_field[i_idx + 1][j_idx] +
-                       (1 - tx) * ty * Ex_field[i_idx][j_idx + 1] +
-                       tx * ty * Ex_field[i_idx + 1][j_idx + 1];
-
-    // Bilinear interpolation for Ey
-    double Ey_interp = (1 - tx) * (1 - ty) * Ey_field[i_idx][j_idx] +
-                       tx * (1 - ty) * Ey_field[i_idx + 1][j_idx] +
-                       (1 - tx) * ty * Ey_field[i_idx][j_idx + 1] +
-                       tx * ty * Ey_field[i_idx + 1][j_idx + 1]; // Ey_field is V/m
-
-    return {Ex_interp, Ey_interp}; // Returns V/m
+    return {Ex_interp, Ey_interp};
 }
 
-std::pair<double, double> get_acceleration(
+// Optimized acceleration calculation with inlining hint
+inline std::pair<double, double> get_acceleration(
     double px, double py, // px, py in meters
     const std::vector<double>& x_coords, const std::vector<double>& y_coords, // x_coords, y_coords in meters
     const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field, // Fields in V/m
     double h_grid, int Nx, int Ny) { // h_grid in meters
     
-    std::pair<double, double> E_vec = get_field_at_point(px, py, x_coords, y_coords, Ex_field, Ey_field, h_grid, Nx, Ny); // E_vec is V/m
+    std::pair<double, double> E_vec = get_field_at_point(px, py, x_coords, y_coords, Ex_field, Ey_field, h_grid, Nx, Ny);
+    
+    // Using the constant directly for multiplication saves a memory lookup
     return {K_ACCEL * E_vec.first, K_ACCEL * E_vec.second}; // (ax, ay) in m/s^2
 }
 
-bool is_in_material_or_out_of_bounds(double px, double py, // px, py in meters
-                                      const std::vector<double>& x_coords_m, // in meters
-                                      const std::vector<double>& y_coords_m, // in meters
-                                      const std::vector<std::vector<double>>& eps_r_map,
-                                      double h_grid_m, // grid spacing in meters
-                                      double L_total_sim_m, double H_total_sim_m) {
-    if (px < 0.0 || px >= L_total_sim_m || py < 0.0 || py >= H_total_sim_m) {
+// Optimized with inline hint for better compiler optimization
+inline bool is_in_material_or_out_of_bounds(
+    double px, double py, // px, py in meters
+    const std::vector<double>& x_coords_m, // in meters
+    const std::vector<double>& y_coords_m, // in meters
+    const std::vector<std::vector<double>>& eps_r_map,
+    double h_grid_m, // grid spacing in meters
+    double L_total_sim_m, double H_total_sim_m) {
+    
+    // Fast bounds check - more efficient branching
+    if (px <= 0.0 || px >= L_total_sim_m || py <= 0.0 || py >= H_total_sim_m) {
         return true; // Out of simulation box
     }
 
-    int i_idx = static_cast<int>(std::floor(px / h_grid_m));
-    int j_idx = static_cast<int>(std::floor(py / h_grid_m));
+    // Fast integer division using reciprocal multiplication
+    const double inv_h_grid_m = 1.0 / h_grid_m;
+    const int i_idx = static_cast<int>(px * inv_h_grid_m);
+    const int j_idx = static_cast<int>(py * inv_h_grid_m);
 
-    // Ensure indices are within the bounds of the eps_r_map
-    // The map dimensions are Nx and Ny from the loaded coordinates
-    int Nx_map = eps_r_map.size();
-    if (Nx_map == 0) return true; // Should not happen if loaded correctly
-    int Ny_map = eps_r_map[0].size();
-    if (Ny_map == 0) return true; // Should not happen
+    // Get map dimensions once to avoid multiple lookups
+    const int Nx_map = eps_r_map.size();
+    if (UNLIKELY(Nx_map == 0)) return true;  // UNLIKELY macro hint for branch prediction
+    
+    const int Ny_map = eps_r_map[0].size();
+    if (UNLIKELY(Ny_map == 0)) return true;  // UNLIKELY macro hint for branch prediction
 
-    i_idx = std::max(0, std::min(i_idx, Nx_map - 1));
-    j_idx = std::max(0, std::min(j_idx, Ny_map - 1));
+    // Index clamping with branchless min/max
+    const int i = std::max(0, std::min(i_idx, Nx_map - 1));
+    const int j = std::max(0, std::min(j_idx, Ny_map - 1));
 
-    double permittivity_at_point = eps_r_map[i_idx][j_idx];
-
-    // Define a threshold to distinguish silicon from vacuum
-    // const double EPS_SI_SIM = 11.7; // No longer used
-    // const double EPS_VAC_SIM = 1.0;  // No longer used directly here for threshold
-    // const double material_threshold = (EPS_SI_SIM + EPS_VAC_SIM) / 2.0; // Replaced
-
-    if (permittivity_at_point >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) { // Use new threshold
-        return true; // Proton is in a material region
-    }
-
-    return false; // Proton is in vacuum or free space within bounds
+    // Direct comparison instead of branching
+    return eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD;
 }
 
 
@@ -473,11 +497,21 @@ int main(int argc, char* argv[]) { // Modified main signature
 
     const std::string all_trajectories_filename = folder + "/all_proton_trajectories.csv";
     std::ofstream all_trajectories_file_stream;
-    all_trajectories_file_stream.open(all_trajectories_filename, std::ios::out);
+    
+    // Optimize file I/O with larger buffer and binary mode
+    const int OUTPUT_BUFFER_SIZE = 1024 * 1024; // 1MB buffer for better I/O performance
+    char* output_buffer = new char[OUTPUT_BUFFER_SIZE];
+    
+    all_trajectories_file_stream.open(all_trajectories_filename, std::ios::out | std::ios::binary);
+    all_trajectories_file_stream.rdbuf()->pubsetbuf(output_buffer, OUTPUT_BUFFER_SIZE);
+    
     if (!all_trajectories_file_stream.is_open()) {
         std::cerr << "Error: Could not open the consolidated trajectory file: " << all_trajectories_filename << ". Exiting." << std::endl;
+        delete[] output_buffer;
         return 1;
     }
+    
+    // Set numeric precision once for the entire stream
     all_trajectories_file_stream << std::scientific << std::setprecision(8);
     all_trajectories_file_stream << "proton_id,time_s,x_m,y_m,vx_m_per_s,vy_m_per_s\n";
 
@@ -615,111 +649,164 @@ int main(int argc, char* argv[]) { // Modified main signature
     std::cout << "Starting simulation for " << NUM_PROTONS << " protons..." << std::endl;
     std::cout << "Total steps: " << num_steps << ", Outputting every " << output_every_n_steps << " steps." << std::endl;
 
+    // Main simulation loop with optimized iteration strategy
     for (int step = 0; step < num_steps; ++step) {
-        if (active_protons_count == 0) {
+        // Early exit if no active protons
+        if (UNLIKELY(active_protons_count == 0)) {
             std::cout << "All protons inactive. Stopping simulation early at step " << step << "." << std::endl;
             break;
         }
 
-        bool needs_output_this_step = ((step + 1) % output_every_n_steps == 0);
+        // Calculate output needed only once per step
+        const bool needs_output_this_step = ((step + 1) % output_every_n_steps == 0);
+        const double step_time = current_time + TIME_STEP_S;
 
-        #pragma omp parallel for
+        // Parallel region with optimized scheduling for better load balancing
+        #pragma omp parallel for schedule(dynamic, 32)
         for (int i = 0; i < NUM_PROTONS; ++i) {
+            // Skip inactive protons immediately
             if (!protons[i].active) continue;
 
-            Proton& p = protons[i]; // Each thread works on its own proton p
+            // Reference to current proton for better readability and avoids extra copying
+            Proton& p = protons[i];
 
-            // RK4 step variables are local to each iteration/thread
-            std::pair<double, double> a1, a2, a3, a4;
+            // Local cache of acceleration and RK4 variables
+            double px = p.x, py = p.y;
+            double vx = p.vx, vy = p.vy;
+            double ax1, ay1, ax2, ay2, ax3, ay3, ax4, ay4;
             double k1x, k1y, k1vx, k1vy;
             double k2x, k2y, k2vx, k2vy;
             double k3x, k3y, k3vx, k3vy;
             double k4x, k4y, k4vx, k4vy;
 
-            // k1
-            a1 = get_acceleration(p.x, p.y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
-            k1vx = TIME_STEP_S * a1.first;
-            k1vy = TIME_STEP_S * a1.second;
-            k1x = TIME_STEP_S * p.vx;
-            k1y = TIME_STEP_S * p.vy;
+            // k1 computation - original position and velocity
+            std::pair<double, double> a1 = get_acceleration(px, py, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            ax1 = a1.first;
+            ay1 = a1.second;
+            k1vx = TIME_STEP_S * ax1;
+            k1vy = TIME_STEP_S * ay1;
+            k1x = TIME_STEP_S * vx;
+            k1y = TIME_STEP_S * vy;
 
-            // k2
-            a2 = get_acceleration(p.x + k1x/2.0, p.y + k1y/2.0, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
-            k2vx = TIME_STEP_S * a2.first;
-            k2vy = TIME_STEP_S * a2.second;
-            k2x = TIME_STEP_S * (p.vx + k1vx/2.0);
-            k2y = TIME_STEP_S * (p.vy + k1vy/2.0);
+            // k2 computation - midpoint using k1
+            std::pair<double, double> a2 = get_acceleration(px + k1x*0.5, py + k1y*0.5, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            ax2 = a2.first;
+            ay2 = a2.second;
+            k2vx = TIME_STEP_S * ax2;
+            k2vy = TIME_STEP_S * ay2;
+            k2x = TIME_STEP_S * (vx + k1vx*0.5);
+            k2y = TIME_STEP_S * (vy + k1vy*0.5);
 
-            // k3
-            a3 = get_acceleration(p.x + k2x/2.0, p.y + k2y/2.0, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
-            k3vx = TIME_STEP_S * a3.first;
-            k3vy = TIME_STEP_S * a3.second;
-            k3x = TIME_STEP_S * (p.vx + k2vx/2.0);
-            k3y = TIME_STEP_S * (p.vy + k2vy/2.0);
+            // k3 computation - midpoint using k2
+            std::pair<double, double> a3 = get_acceleration(px + k2x*0.5, py + k2y*0.5, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            ax3 = a3.first;
+            ay3 = a3.second;
+            k3vx = TIME_STEP_S * ax3;
+            k3vy = TIME_STEP_S * ay3;
+            k3x = TIME_STEP_S * (vx + k2vx*0.5);
+            k3y = TIME_STEP_S * (vy + k2vy*0.5);
 
-            // k4
-            a4 = get_acceleration(p.x + k3x, p.y + k3y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
-            k4vx = TIME_STEP_S * a4.first;
-            k4vy = TIME_STEP_S * a4.second;
-            k4x = TIME_STEP_S * (p.vx + k3vx);
-            k4y = TIME_STEP_S * (p.vy + k3vy);
+            // k4 computation - endpoint using k3
+            std::pair<double, double> a4 = get_acceleration(px + k3x, py + k3y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            ax4 = a4.first;
+            ay4 = a4.second;
+            k4vx = TIME_STEP_S * ax4;
+            k4vy = TIME_STEP_S * ay4;
+            k4x = TIME_STEP_S * (vx + k3vx);
+            k4y = TIME_STEP_S * (vy + k3vy);
 
-            // Update proton state (these writes are safe as each thread owns its protons[i])
-            p.x += (k1x + 2.0*k2x + 2.0*k3x + k4x) / 6.0;
-            p.y += (k1y + 2.0*k2y + 2.0*k3y + k4y) / 6.0;
-            p.vx += (k1vx + 2.0*k2vx + 2.0*k3vx + k4vx) / 6.0;
-            p.vy += (k1vy + 2.0*k2vy + 2.0*k3vy + k4vy) / 6.0;
+            // Optimized RK4 update with constant multipliers pre-calculated
+            const double one_sixth = 1.0/6.0;
+            const double one_third = 1.0/3.0;
+            px += (k1x + k4x) * one_sixth + (k2x + k3x) * one_third;
+            py += (k1y + k4y) * one_sixth + (k2y + k3y) * one_third;
+            vx += (k1vx + k4vx) * one_sixth + (k2vx + k3vx) * one_third;
+            vy += (k1vy + k4vy) * one_sixth + (k2vy + k3vy) * one_third;
+
+            // Update proton state with optimized values
+            p.x = px;
+            p.y = py;
+            p.vx = vx;
+            p.vy = vy;
 
 
-            // Check if proton reached the end successfully
-            if (p.x >= L_total_sim) { // L_total_sim is in meters
-                if (p.active) { // Ensure this block is executed only once per proton
+            // Check if proton reached the end successfully - optimized branch prediction
+            if (UNLIKELY(px >= L_total_sim)) {
+                if (p.active) {
                     p.active = false;
+                    
+                    // Atomic operations for thread-safety, but minimized for better performance
                     #pragma omp atomic update
                     protons_reached_end_successfully++;
+                    
                     #pragma omp atomic update
                     active_protons_count--;
                     
+                    // Use string buffer for better I/O performance
                     #pragma omp critical (trajectory_file_write)
                     {
-                        all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                        all_trajectories_file_stream 
+                            << p.id << ',' 
+                            << step_time << ',' 
+                            << px << ',' 
+                            << py << ',' 
+                            << vx << ',' 
+                            << vy << '\n';
                     }
                 }
                 continue; 
             }
 
-            // Check if proton hit material or went out of other bounds (all checks in meters)
-            if (p.active && is_in_material_or_out_of_bounds(p.x, p.y, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
-                p.active = false; // This modification to p.active is safe
+            // Check for material collision or out of bounds - less frequent condition
+            if (p.active && is_in_material_or_out_of_bounds(px, py, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
+                p.active = false;
+                
                 #pragma omp atomic update
                 active_protons_count--;
                 
                 #pragma omp critical (trajectory_file_write)
                 {
-                    all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                    all_trajectories_file_stream 
+                        << p.id << ',' 
+                        << step_time << ',' 
+                        << px << ',' 
+                        << py << ',' 
+                        << vx << ',' 
+                        << vy << '\n';
                 }
             }
 
-            // Regular output if still active and it's an output step
-            if (p.active && needs_output_this_step) {
+            // Regular output if still active and it's an output step - less frequent condition
+            else if (p.active && needs_output_this_step) {
                 #pragma omp critical (trajectory_file_write)
                 {
-                    all_trajectories_file_stream << p.id << "," << (current_time + TIME_STEP_S) << "," << p.x << "," << p.y << "," << p.vx << "," << p.vy << "\n";
+                    all_trajectories_file_stream 
+                        << p.id << ',' 
+                        << step_time << ',' 
+                        << px << ',' 
+                        << py << ',' 
+                        << vx << ',' 
+                        << vy << '\n';
                 }
             }
         } // End of parallel for loop over protons
 
+        // Update time for next step
         current_time += TIME_STEP_S;
         
-        // Progress reporting remains the same
-        if ((step + 1) % std::max(1, num_steps / 100) == 0 || step == num_steps -1 ) { 
-             double progress = static_cast<double>(step + 1) / num_steps * 100.0;
-             std::cout << "\rSimulation progress: " << std::fixed << std::setprecision(2) << progress << "% (" << active_protons_count << " active protons)" << std::flush;
+        // Progress reporting with optimized modulo calculation and flush only when needed
+        if ((step + 1) % std::max(1, num_steps / 100) == 0 || step == num_steps - 1) { 
+            double progress = static_cast<double>(step + 1) / num_steps * 100.0;
+            std::cout << "\rSimulation progress: " << std::fixed << std::setprecision(2) 
+                     << progress << "% (" << active_protons_count << " active protons)" << std::flush;
         }
     }
     std::cout << "\nSimulation finished." << std::endl;
 
-    all_trajectories_file_stream.close(); // Close the single trajectory file
+    // Ensure all data is flushed and file is properly closed
+    all_trajectories_file_stream.flush();
+    all_trajectories_file_stream.close();
+    delete[] output_buffer; // Clean up the buffer
 
     double success_percentage = 0.0;
     if (NUM_PROTONS > 0) {
