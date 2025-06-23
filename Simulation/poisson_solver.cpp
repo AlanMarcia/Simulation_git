@@ -237,9 +237,13 @@ int main(int argc, char* argv[]) {
     if (current_geometry_type == GeometryType::PIANA) {
         saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, &piana_geom_params, nullptr, nullptr);
     } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);
-    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
         saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, &du_geom_params);
+    } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI_NM) {
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);
+    } else {
+        std::cerr << "Error: Unsupported geometry type for saving parameters." << std::endl;
+        return 1; // Exit if geometry type is unsupported
     }
     // --- Grid Setup ---
     const int Nx = static_cast<int>(geom_config.L_total / geom_config.h) + 1;
