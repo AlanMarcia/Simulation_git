@@ -76,11 +76,9 @@ void saveGeometryParamsToCSV(const std::string& filename,
 
 int main() {
     // --- Parameters ---
-    const double h = 0.5; // Grid spacing in micrometers (µm)
-
-    // Dimensions in µm
+    const double h = 0.5; // Grid spacing in micrometers (µm)    // Dimensions in µm
     const double L_total = 320.0;
-    const double H_total = 30.0;
+    const double H_total = 50.0; // Updated: added 20 μm (10 μm top + 10 μm bottom vacuum padding)
 
     const double x_free_space = 10.0;
     const double x_structure_len = 300.0;

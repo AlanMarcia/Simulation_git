@@ -459,18 +459,15 @@ void plot_trajectories_main(const std::string& folder_path_str = "") {
 
     } else {
         std::cout << "No successful protons found to generate an energy histogram." << std::endl;
-    }    // --- Acceleration and Velocity Profiles vs Position ---
-    std::map<double, std::vector<double>> x_pos_to_ax_list;
-    std::map<double, std::vector<double>> x_pos_to_ay_list;
-    std::map<double, std::vector<double>> x_pos_to_a_mag_list;
-    std::map<double, std::vector<double>> x_pos_to_vx_list;
-    std::map<double, std::vector<double>> x_pos_to_vy_list;
-    std::map<double, std::vector<double>> x_pos_to_v_mag_list;
+    }    // --- Acceleration and Velocity Profiles vs Position (Enhanced) ---
+    std::vector<double> all_acceleration_x_pos, all_acceleration_mag;
+    std::vector<double> all_velocity_x_pos, all_velocity_mag;
 
-    // Define spatial binning parameters
+    // Define spatial binning parameters (matching Python approach)
     double x_min_m = x_coords.empty() ? 0 : x_coords.front() * 1e-6; // Convert from um to m
     double x_max_m = x_coords.empty() ? 1e-6 : x_coords.back() * 1e-6;
-    double x_bin_size_m = (x_max_m - x_min_m) / 100.0; // 100 spatial bins
+    const int num_bins = 100; // Number of spatial bins
+    double x_bin_size_m = (x_max_m - x_min_m) / num_bins;
     
     for (const auto& traj : all_trajectories) {
         if (traj.time_s.empty() || traj.x_m.empty()) continue;

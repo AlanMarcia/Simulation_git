@@ -286,7 +286,7 @@ int main(int argc, char* argv[]) {
         setupDentiUgualiPermittivity(eps_r, geom_config, du_geom_params, Nx, Ny);
     }
     
-    std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << std::endl;
+    std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << ", Grid spacing h=" << geom_config.h << " µm" << std::endl;
 
     // --- Boundary Conditions ---
     setupBoundaryConditions(V, fixed_potential_mask, eps_r, geom_config, V_left_bc, V_right_bc, Nx, Ny);

@@ -38,7 +38,7 @@ const double M_PROTON = 1.67262192e-27; // kg (SI)
 const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
-const int NUM_PROTONS = 10000;
+const int NUM_PROTONS = 100000;
 const double TIME_STEP_S = 1e-12;       // Time step in seconds (SI)
 const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
 const double OUTPUT_TIME_INTERVAL_S = 1e-11; // Interval for writing trajectory data (SI)
@@ -624,9 +624,23 @@ int main(int argc, char* argv[]) { // Modified main signature
     std::cout << "Proton initial y-distribution range (m) from epsilon_map: [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
     
     std::vector<Proton> protons(NUM_PROTONS);
-    std::mt19937 rng(std::random_device{}()); // Corrected initialization
-    std::uniform_real_distribution<double> dist_y(20e-6,30e-6); // y in meters
 
+    // Allow user to specify RNG seed via command line (second argument), else use random_device
+    unsigned int rng_seed = std::random_device{}();
+    if (argc > 2) {
+        try {
+            rng_seed = static_cast<unsigned int>(std::stoul(argv[2]));
+            std::cout << "Using user-specified RNG seed: " << rng_seed << std::endl;
+        } catch (...) {
+            std::cerr << "Warning: Invalid RNG seed argument, using random_device." << std::endl;
+        }
+    } else {
+        std::cout << "No RNG seed specified, using random_device: " << rng_seed << std::endl;
+    }
+    std::mt19937 rng(rng_seed);
+
+    // Use vacuum gap for y-distribution
+    std::uniform_real_distribution<double> dist_y(20e-6, 30e-6); // y in meters
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
         protons[i].id = i; // Assign ID
