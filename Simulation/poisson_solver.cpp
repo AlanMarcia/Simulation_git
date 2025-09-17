@@ -113,104 +113,39 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Unknown geometry type '" << geometry_type_str << "'. Exiting." << std::endl;
         return 1;
     }
-    
-    std::cout << "Selected output folder: " << output_folder_name << std::endl;
-    std::cout << "Selected geometry type: " << geometryTypeToString(current_geometry_type) << std::endl;
+    outfile << std::fixed << std::setprecision(10); // Ensure precision
+    outfile << "h," << h_val << std::endl;
+    outfile << "x_free_space," << x_fs << std::endl;
+    outfile << "x_structure_len," << x_sl << std::endl;
+    outfile << "y_si_layer_thick," << y_slt << std::endl;
+    outfile << "y_vacuum_gap_thick," << y_vgt << std::endl;
+    outfile << "H_total," << H_tot << std::endl;
+    outfile.close();
+    std::cout << "Geometry parameters saved to " << filename << std::endl;
+}
 
-    const std::string base_simulation_dir = "/mnt/c/Users/admin/Desktop/Simulation_git/Simulation/";
-    const std::string output_folder = base_simulation_dir + output_folder_name; // Full path to final output directory
 
-    // --- Create Output Directories Recursively ---
-    // This section ensures that if output_folder_name is "A/B", both "base_simulation_dir/A" 
-    // and "base_simulation_dir/A/B" are created if they don't exist.
-    std::string path_being_built = base_simulation_dir;
-    // Ensure base_simulation_dir exists (typically a given, but good for full robustness check if needed)
-    // For this solution, we assume base_simulation_dir exists and is writable.
-    // We also ensure base_simulation_dir ends with a slash for proper concatenation.
-    if (!path_being_built.empty() && path_being_built.back() != '/') {
-        path_being_built += '/';
-    }
+int main() {
+    // --- Parameters ---
+    const double h = 0.5; // Grid spacing in micrometers (µm)
 
-    if (output_folder_name.empty()) {
-        // If output_folder_name is empty, output_folder is just base_simulation_dir.
-        // Check if base_simulation_dir itself exists and is a directory.
-        struct STAT_STRUCT info;
-        if (STAT_FUNC(base_simulation_dir.c_str(), &info) != 0) {
-            std::cerr << "Error: Base simulation directory " << base_simulation_dir << " does not exist. Exiting." << std::endl;
-            return 1;
-        } else if (!(info.st_mode & S_IFDIR)) {
-            std::cerr << "Error: Path " << base_simulation_dir << " is not a directory. Exiting." << std::endl;
-            return 1;
-        }
-    } else {
-        size_t start = 0;
-        size_t end = 0;
-        std::string current_segment_to_process = output_folder_name;
+    // Dimensions in µm
+    const double L_total = 320.0;
+    const double H_total = 30.0;
 
-        // Remove trailing slash from current_segment_to_process if present, to avoid empty last component
-        if (!current_segment_to_process.empty() && current_segment_to_process.back() == '/') {
-            current_segment_to_process.pop_back();
-        }
-        
-        if (!current_segment_to_process.empty()) { // Proceed only if there are segments to create
-            while (true) {
-                // Find the next path separator
-                end = current_segment_to_process.find('/', start);
-                
-                // Extract the current directory component
-                std::string dir_component;
-                if (end == std::string::npos) { // Last component
-                    dir_component = current_segment_to_process.substr(start);
-                } else { // Intermediate component
-                    dir_component = current_segment_to_process.substr(start, end - start);
-                }
+    const double x_free_space = 10.0;
+    const double x_structure_len = 300.0;
+    const double y_si_layer_thick = 10.0;
+    const double y_vacuum_gap_thick = 10.0;
 
-                if (!dir_component.empty()) { // Avoid issues with empty components (e.g., "A//B")
-                    // Append the component to the path being built
-                    // path_being_built should already have a trailing slash from base_simulation_dir or previous iteration
-                    path_being_built += dir_component;
+    // SOR parameters
+    const double omega = 1.8; // Relaxation factor
+    const double tolerance = 1e-5; // Convergence tolerance
+    const int max_iterations = 50000;
 
-                    struct STAT_STRUCT info;
-                    if (STAT_FUNC(path_being_built.c_str(), &info) != 0) { // If path component does not exist
-                        if (MKDIR(path_being_built.c_str()) != 0) { // Attempt to create it
-                            std::cerr << "Error: Could not create directory " << path_being_built << ". Exiting." << std::endl;
-                            return 1; // Critical error, cannot proceed
-                        }
-                        std::cout << "Created directory: " << path_being_built << std::endl;
-                    } else if (!(info.st_mode & S_IFDIR)) { // If path exists but is not a directory
-                        std::cerr << "Error: Path " << path_being_built << " exists but is not a directory. Exiting." << std::endl;
-                        return 1; // Critical error
-                    }
-                    // Add slash for the next component, only if it's not the last one
-                    if (end != std::string::npos) {
-                         path_being_built += '/';
-                    }
-                }
-                
-                if (end == std::string::npos) {
-                    break; // All components processed
-                }
-                start = end + 1; // Move to the character after the slash
-                // If start is at or beyond the end of the string (e.g. "A/B/"), no more components.
-                if (start >= current_segment_to_process.length()) {
-                    break;
-                }
-            }
-        }
-    }
-    // At this point, the full 'output_folder' path should exist.
-
-    // --- Common Parameters ---
-    const double common_h_param = 0.5; // Grid spacing in micrometers (µm)
-    const double V_left_bc = 0.0;  // Volts
-    const double V_right_bc = -1000.0; // Volts
-    const double omega_sor = 1.8; // Relaxation factor
-    const int max_iter_sor = 500000;
-    
-    // Material properties
-    const double eps_sio2_mat = 3.9;
-    const double eps_si_mat = 11.7;
-    const double eps_vac_mat = 1.0;
+    // Material properties (relative permittivity)
+    const double eps_si = 11.7;
+    const double eps_vac = 1.0;
 
     // Dichiarazione delle strutture dei parametri
     GeometryConfig geom_config;
