@@ -1,0 +1,97 @@
+# Makefile per PIC_DLA_Accelerator (versione parallelizzata)
+
+# Compilatore
+CXX = g++
+
+# Flag di compilazione per OpenMP e ottimizzazioni
+CXXFLAGS = -std=c++17 -O3 -march=native -fopenmp -Wall -Wextra
+LDFLAGS = -fopenmp
+
+# File sorgenti
+SOURCES = PIC_DLA_Accelerator_Parallel.cpp
+EXECUTABLE = pic_dla_parallel
+
+# Versione originale
+SOURCES_ORIG = PIC_DLA_Accelerator.cpp
+EXECUTABLE_ORIG = pic_dla_original
+
+# Target principale
+all: $(EXECUTABLE)
+
+# Compilazione versione parallelizzata
+$(EXECUTABLE): $(SOURCES)
+	$(CXX) $(CXXFLAGS) -o $(EXECUTABLE) $(SOURCES) $(LDFLAGS)
+	@echo "Compilazione completata: $(EXECUTABLE)"
+	@echo "Per eseguire: ./$(EXECUTABLE)"
+
+# Compilazione versione originale per confronto
+original: $(SOURCES_ORIG)
+	$(CXX) -std=c++17 -O3 -march=native -Wall -Wextra -o $(EXECUTABLE_ORIG) $(SOURCES_ORIG)
+	@echo "Compilazione versione originale completata: $(EXECUTABLE_ORIG)"
+
+# Compilazione con debug
+debug: CXXFLAGS = -std=c++17 -g -fopenmp -Wall -Wextra -DDEBUG
+debug: $(EXECUTABLE)
+	@echo "Compilazione debug completata"
+
+# Compilazione con profiling
+profile: CXXFLAGS = -std=c++17 -O3 -march=native -fopenmp -Wall -Wextra -pg
+profile: LDFLAGS = -fopenmp -pg
+profile: $(EXECUTABLE)
+	@echo "Compilazione con profiling completata"
+
+# Test delle prestazioni
+benchmark: $(EXECUTABLE) original
+	@echo "=== BENCHMARK DELLE PRESTAZIONI ==="
+	@echo "Testando versione originale..."
+	time ./$(EXECUTABLE_ORIG) > results_original.txt 2>&1 || true
+	@echo "Testando versione parallelizzata..."
+	time ./$(EXECUTABLE) > results_parallel.txt 2>&1 || true
+	@echo "Risultati salvati in results_*.txt"
+
+# Pulizia
+clean:
+	rm -f $(EXECUTABLE) $(EXECUTABLE_ORIG) *.o *.csv *.png *.txt
+	@echo "Pulizia completata"
+
+# Test diversi numeri di thread
+test_threads: $(EXECUTABLE)
+	@echo "=== TEST CON DIVERSI NUMERI DI THREAD ==="
+	@for threads in 1 2 4 8; do \
+		echo "Testando con $$threads thread..."; \
+		OMP_NUM_THREADS=$$threads time ./$(EXECUTABLE) > results_$$threads.txt 2>&1 || true; \
+	done
+	@echo "Test completato. Risultati in results_N.txt"
+
+# Informazioni sul sistema
+sysinfo:
+	@echo "=== INFORMAZIONI SISTEMA ==="
+	@echo "Processore: $$(lscpu | grep 'Model name' | cut -d: -f2 | xargs)"
+	@echo "Core fisici: $$(lscpu | grep '^CPU(s):' | cut -d: -f2 | xargs)"
+	@echo "Thread per core: $$(lscpu | grep 'Thread(s) per core' | cut -d: -f2 | xargs)"
+	@echo "Compilatore: $$($(CXX) --version | head -n1)"
+	@echo "OpenMP: $$(echo | $(CXX) -fopenmp -dM -E - | grep _OPENMP)"
+
+# Help
+help:
+	@echo "Target disponibili:"
+	@echo "  all          - Compila la versione parallelizzata (default)"
+	@echo "  original     - Compila la versione originale"
+	@echo "  debug        - Compila con simboli di debug"
+	@echo "  profile      - Compila con profiling attivato"
+	@echo "  benchmark    - Confronta le prestazioni delle due versioni"
+	@echo "  test_threads - Testa con diversi numeri di thread"
+	@echo "  clean        - Rimuove tutti i file generati"
+	@echo "  sysinfo      - Mostra informazioni sul sistema"
+	@echo "  help         - Mostra questo messaggio"
+	@echo ""
+	@echo "Variabili di ambiente utili:"
+	@echo "  OMP_NUM_THREADS=N  - Imposta il numero di thread OpenMP"
+	@echo "  OMP_SCHEDULE=type  - Imposta il tipo di scheduling"
+	@echo ""
+	@echo "Esempi:"
+	@echo "  make && ./pic_dla_parallel"
+	@echo "  OMP_NUM_THREADS=4 ./pic_dla_parallel"
+	@echo "  make benchmark"
+
+.PHONY: all original debug profile benchmark clean test_threads sysinfo help

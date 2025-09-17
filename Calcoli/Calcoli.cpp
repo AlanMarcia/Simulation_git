@@ -2,20 +2,16 @@
 #include <cmath>
 #include <vector>   // Utile per salvare i dati per un plot
 #include <iomanip>  // Per una stampa più pulita
-<<<<<<< HEAD
 #include <fstream>  // Per scrivere file CSV
-=======
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
+
+using std::sqrt;
+using std::pow;
 
 int main() {
     // ---- INPUT ----
     const double initial_K_keV = 100.0;    // Energia Cinetica Iniziale [keV]
     const double G_GV_per_m = 1;         // Gradiente Accelerante [GV/m]
-<<<<<<< HEAD
     const double lambda_um = 6.0;          // Lunghezza d'onda Laser [µm]
-=======
-    const double lambda_um = 2.0;          // Lunghezza d'onda Laser [µm]
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     const double L_total_um = 100.0;        // Lunghezza massima da simulare [µm]
     const double step_size_um = 0.0001;      // Dimensione del passo di integrazione [µm]
 
@@ -31,11 +27,10 @@ int main() {
 
     // Calcoli iniziali
     double initial_E_MeV = initial_K_MeV + E0_MeV;
-    const double initial_beta = sqrt(1.0 - pow(E0_MeV / initial_E_MeV, 2));
+    const double initial_beta = std::sqrt(1.0 - std::pow(static_cast<double>(E0_MeV / initial_E_MeV), 2.0));
     const double Lambda_um = initial_beta * lambda_um;
 
     int num_steps = static_cast<int>(L_total_um / step_size_um);
-<<<<<<< HEAD
 
     std::cout << std::fixed << std::setprecision(6);
     std::cout << "Inizio Simulazione..." << std::endl;
@@ -44,12 +39,6 @@ int main() {
     std::ofstream csv_file("risultati_stadi.csv");
     csv_file << std::fixed << std::setprecision(6);
     csv_file << "Stadio,Z_inizio_um,Z_fine_um,Lunghezza_um,K_iniziale_keV,K_finale_keV,Beta_iniziale,Beta_finale,Lambda_iniziale_um,Lambda_finale_um,Numero_denti\n";
-=======
-cd .
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Inizio Simulazione..." << std::endl;
-    
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 
     // ---- CICLO DI INTEGRAZIONE NUMERICA ----
     for (int i = 0; i < num_steps; ++i) {
@@ -70,7 +59,6 @@ cd .
 
         // 3. Controlla se abbiamo superato i 90 gradi
         if (std::abs(total_Delta_Phi) >= 90.0) {
-<<<<<<< HEAD
             std::cout << "\nSTADIO 1:" << std::endl;
             std::cout << "Beta iniziale: " << initial_beta << ", Lambda struttura: " << Lambda_um << " um" << std::endl;
             std::cout << "--------------------------------------------------------" << std::endl;
@@ -147,14 +135,6 @@ cd .
                          << "," << (lunghezza_stadio / stadio_Lambda_um_iniziale) << "\n";
             }
             
-=======
-            std::cout << "\nBeta iniziale: " << initial_beta << ", Lambda struttura: " << Lambda_um << " um" << std::endl;
-            std::cout << "--------------------------------------------------------" << std::endl;
-            std::cout << "\nSfasamento di 90 gradi raggiunto a z = " << z_um << " um" << std::endl;
-            std::cout << "Energia cinetica finale: " << current_K_MeV * 1000 << " keV" << std::endl;
-            std::cout << "Numero di denti: " << (z_um / Lambda_um) << std::endl;
-            std::cout << "--------------------------------------------------------" << std::endl;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
             break;
         }
 
@@ -166,11 +146,8 @@ cd .
     std::cout << "--------------------------------------------------------" << std::endl;
     std::cout << "Simulazione completata." << std::endl;
 
-<<<<<<< HEAD
     // Chiudi il file CSV
     csv_file.close();
 
-=======
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     return 0;
 }
