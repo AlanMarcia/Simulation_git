@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
     "C_Cpp.errorSquiggles": "disabled",
     "files.associations": {
         "*.sh": "shellscript",
@@ -61,4 +62,7 @@
         "plot_trajectories_root.C": "cpp",
         "plot_results_root.C": "cpp"
     }
+=======
+    "C_Cpp.errorSquiggles": "disabled"
+>>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 }
