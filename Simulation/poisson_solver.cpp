@@ -64,7 +64,7 @@ void saveGeometryParamsToCSV(const std::string& filename,
 
 int main() {
     // --- Parameters ---
-    const double h = 0.5; // Grid spacing in micrometers (µm)
+    const double h = 1; // Grid spacing in micrometers (µm)
 
     // Dimensions in µm
     const double L_total = 320.0;
@@ -78,7 +78,7 @@ int main() {
     // SOR parameters
     const double omega = 1.8; // Relaxation factor
     const double tolerance = 1e-5; // Convergence tolerance
-    const int max_iterations = 50000;
+    const int max_iterations = 500;
 
     // Material properties (relative permittivity)
     const double eps_si = 11.7;
