@@ -1,16 +1,13 @@
-import numpy as np
+﻿import numpy as np
 import matplotlib.pyplot as plt
 import os
 import csv
-<<<<<<< HEAD
 import glob # For finding trajectory files
 import sys # Import sys module for command-line arguments
 
 # Constants for energy calculation
 M_PROTON = 1.67262192e-27  # kg
 Q_ELECTRON = 1.60217663e-19 # Coulombs, for eV conversion
-=======
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 
 def load_1d_csv(filename):
     if not os.path.exists(filename):
@@ -23,7 +20,6 @@ def load_2d_csv(filename):
         print(f"Error: File {filename} not found.")
         return None
     data = np.loadtxt(filename, delimiter=',')
-<<<<<<< HEAD
     return data # Remove .T to keep shape (Ny, Nx)
 
 def load_geometry_params_for_plot(filepath):
@@ -70,46 +66,6 @@ def plot_results(folder_path=None): # Add folder_path argument
     x_coords_file = os.path.join(output_folder_name, "x_coordinates.csv")
     y_coords_file = os.path.join(output_folder_name, "y_coordinates.csv")
     geometry_params_file = os.path.join(output_folder_name, "geometry_params.csv")
-=======
-    return data.T
-
-def load_geometry_params(filename):
-    """Loads geometry parameters from a CSV file."""
-    if not os.path.exists(filename):
-        print(f"Error: File {filename} not found.")
-        return None
-    params = {}
-    with open(filename, 'r') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if len(row) == 2:
-                params[row[0]] = float(row[1])
-    required_keys = ["h", "x_free_space", "x_structure_len", "y_si_layer_thick", "y_vacuum_gap_thick", "H_total"]
-    if not all(key in params for key in required_keys):
-        print(f"Error: Missing one or more required keys in {filename}. Required: {required_keys}")
-        return None
-    return params
-
-def plot_results():
-    # Create output folder
-    output_folder = "geometria_piana"
-    os.makedirs(output_folder, exist_ok=True)
-
-    # File paths
-    potential_file = os.path.join(output_folder, "potential.csv")
-    ex_file = os.path.join(output_folder, "electric_field_x.csv")
-    ey_file = os.path.join(output_folder, "electric_field_y.csv")
-    eps_r_file = os.path.join(output_folder, "permittivity.csv")
-    x_coords_file = os.path.join(output_folder, "x_coordinates.csv")
-    y_coords_file = os.path.join(output_folder, "y_coordinates.csv")
-    geometry_params_file = os.path.join(output_folder, "geometry_params.csv")
-
-    # Load geometry parameters
-    geo_params = load_geometry_params(geometry_params_file)
-    if geo_params is None:
-        print("Could not load geometry parameters. Aborting plot.")
-        return
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 
     # Load data
     V = load_2d_csv(potential_file)
@@ -118,7 +74,6 @@ def plot_results():
     eps_r = load_2d_csv(eps_r_file)
     x_coords = load_1d_csv(x_coords_file)
     y_coords = load_1d_csv(y_coords_file)
-<<<<<<< HEAD
     geo_params = load_geometry_params_for_plot(geometry_params_file)
 
     if V is None or Ex is None or Ey is None or eps_r is None or x_coords is None or y_coords is None:
@@ -138,22 +93,42 @@ def plot_results():
             y_center_gap_abs = y_si_base_h + y_teeth_h_val + (y_vac_gap_thick_toothed / 2.0)
             print(f"Using toothed geometry logic for profile plot y-center.")
         else:
-            # Fallback logic for "geometria_piana" or simpler structures
-            print("Toothed geometry parameters not fully found. Trying 'geometria_piana' logic for profile plot y-center.")
-            y_si_layer_thick_piana = geo_params.get("y_si_layer_thick") 
-            y_vacuum_gap_thick_piana = geo_params.get("y_vacuum_gap_thick") # This might be the same key as above
-
-            if y_si_layer_thick_piana is not None and y_vacuum_gap_thick_piana is not None:
-                y_center_gap_abs = y_si_layer_thick_piana + (y_vacuum_gap_thick_piana / 2.0)
-                print(f"Using 'geometria_piana' logic for profile plot y-center.")
+            # Try piana_rastremata or piana_variabile geometry
+            print("Toothed geometry parameters not fully found. Trying 'piana_rastremata' or 'piana_variabile' logic for profile plot y-center.")
+            y_si_thick_start = geo_params.get("y_si_layer_thick_start")
+            y_si_thick_end = geo_params.get("y_si_layer_thick_end")
+            y_si_thick_right = geo_params.get("y_si_layer_thick_right")
+            y_si_thick_left = geo_params.get("y_si_layer_thick_left")
+            y_vacuum_gap_thick_var = geo_params.get("y_vacuum_gap_thick")
+            
+            # For piana_rastremata or piana_variabile: use average thickness at the center
+            if y_si_thick_start is not None and y_si_thick_end is not None and y_vacuum_gap_thick_var is not None:
+                # For piana_rastremata: thickness varies linearly, use average
+                y_si_layer_avg = (y_si_thick_start + y_si_thick_end) / 2.0
+                y_center_gap_abs = y_si_layer_avg + (y_vacuum_gap_thick_var / 2.0)
+                print(f"Using 'piana_rastremata' logic for profile plot y-center (avg thickness).")
+            elif y_si_thick_right is not None and y_si_thick_left is not None and y_vacuum_gap_thick_var is not None:
+                # For piana_variabile: thickness varies linearly, use average
+                y_si_layer_avg = (y_si_thick_right + y_si_thick_left) / 2.0
+                y_center_gap_abs = y_si_layer_avg + (y_vacuum_gap_thick_var / 2.0)
+                print(f"Using 'piana_variabile' logic for profile plot y-center (avg thickness).")
             else:
-                print("Warning: Could not determine vacuum gap center from available geometry parameters (neither toothed nor piana). Profile plot will be skipped.")
+                # Fallback logic for simple "geometria_piana"
+                print("Rastremata/variabile geometry parameters not found. Trying simple 'geometria_piana' logic for profile plot y-center.")
+                y_si_layer_thick_piana = geo_params.get("y_si_layer_thick") 
+                y_vacuum_gap_thick_piana = geo_params.get("y_vacuum_gap_thick")
+
+                if y_si_layer_thick_piana is not None and y_vacuum_gap_thick_piana is not None:
+                    y_center_gap_abs = y_si_layer_thick_piana + (y_vacuum_gap_thick_piana / 2.0)
+                    print(f"Using 'geometria_piana' logic for profile plot y-center.")
+                else:
+                    print("Warning: Could not determine vacuum gap center from available geometry parameters. Profile plot will be skipped.")
         
         if y_center_gap_abs is not None:
             # Find the closest y-index
             if y_coords is not None and len(y_coords) > 0:
                 y_center_gap_idx = (np.abs(y_coords - y_center_gap_abs)).argmin()
-                print(f"Calculated y-center for profile plot: {y_center_gap_abs:.2f} µm (index: {y_center_gap_idx})")
+                print(f"Calculated y-center for profile plot: {y_center_gap_abs:.2f} ┬╡m (index: {y_center_gap_idx})")
             else:
                 print("Warning: y_coords not available for determining profile plot index.")
                 y_center_gap_idx = None # Ensure it's None if y_coords are missing
@@ -224,99 +199,37 @@ def plot_results():
     plt.figure(figsize=(8, 6)) # New figure for Potential
     ax_V = plt.gca()
     contour_V = ax_V.contourf(X_mesh, Y_mesh, V, levels=50, cmap='viridis') # V is already (Ny, Nx)
-=======
-
-    if V is None or Ex is None or Ey is None or eps_r is None or x_coords is None or y_coords is None:
-        print("One or more data files could not be loaded. Aborting plot.")
-        return
-
-    E_mag = np.sqrt(Ex**2 + Ey**2)
-
-    # Geometry for outlines from loaded parameters
-    # h_sim = geo_params["h"] # h from simulation, might be useful for other things
-    x_free_space = geo_params["x_free_space"]
-    x_structure_len = geo_params["x_structure_len"]
-    y_si_layer_thick = geo_params["y_si_layer_thick"]
-    y_vacuum_gap_thick = geo_params["y_vacuum_gap_thick"]
-    H_total_sim = geo_params["H_total"] # Total height from simulation
-
-    x_struct_start = x_free_space
-    x_struct_end = x_free_space + x_structure_len
-    y_si_bot_end = y_si_layer_thick
-    y_vac_end = y_si_layer_thick + y_vacuum_gap_thick # This is the top interface of the vacuum gap
-    y_si_top_start = y_si_layer_thick + y_vacuum_gap_thick # This is the bottom interface of the top Si layer
-
-    # --- Plotting on separate canvases ---
-
-    # Plot 1: Electric Potential
-    plt.figure(figsize=(8, 6)) # New figure for Potential
-    ax_V = plt.gca()
-    contour_V = ax_V.contourf(x_coords, y_coords, V.T, levels=50, cmap='viridis') # V.T because contourf expects Z(Y,X)
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     plt.colorbar(contour_V, ax=ax_V, label='Potential (V)')
     ax_V.set_title('Electric Potential (V)')
-    ax_V.set_xlabel('x (µm)')
-    ax_V.set_ylabel('y (µm)')
+    ax_V.set_xlabel('x (μm)')
+    ax_V.set_ylabel('y (μm)')
     ax_V.set_aspect('equal', adjustable='box')
-<<<<<<< HEAD
     draw_detailed_outlines(ax_V, X_mesh, Y_mesh, eps_r, outline_threshold, 'w--') # eps_r is (Ny, Nx)
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "potential_plot.png"), dpi=300)
-=======
-    # Add structure outlines
-    ax_V.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_V.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_V.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "potential_plot.png"))
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 
     # Plot 2: Electric Field Magnitude
     plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
     ax_Emag = plt.gca()
-<<<<<<< HEAD
     contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag, levels=50, cmap='inferno') # E_mag is (Ny, Nx)
-=======
-    contour_Emag = ax_Emag.contourf(x_coords, y_coords, E_mag.T, levels=50, cmap='inferno') # E_mag.T
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
-    plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/µm)')
+    plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/μm)')
     ax_Emag.set_title('Electric Field Magnitude |E|')
-    ax_Emag.set_xlabel('x (µm)')
-    ax_Emag.set_ylabel('y (µm)')
+    ax_Emag.set_xlabel('x (μm)')
+    ax_Emag.set_ylabel('y (μm)')
     ax_Emag.set_aspect('equal', adjustable='box')
-<<<<<<< HEAD
     draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold, 'w--')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "efield_magnitude_plot.png"), dpi=300)
-=======
-    # Add structure outlines
-    ax_Emag.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_Emag.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "efield_magnitude_plot.png"))
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
 
     # Plot 3: Permittivity Map
     plt.figure(figsize=(8, 6)) # New figure for Permittivity
     ax_eps = plt.gca()
-<<<<<<< HEAD
     contour_eps = ax_eps.contourf(X_mesh, Y_mesh, eps_r, levels=np.linspace(np.min(eps_r), np.max(eps_r), 5), cmap='coolwarm') # eps_r is (Ny, Nx)
-=======
-    contour_eps = ax_eps.contourf(x_coords, y_coords, eps_r.T, levels=10, cmap='coolwarm') # eps_r.T
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
-    plt.colorbar(contour_eps, ax=ax_eps, label='Relative Permittivity (ε$_r$)')
+    plt.colorbar(contour_eps, ax=ax_eps, label='Relative Permittivity (εᵣ)')
     ax_eps.set_title('Relative Permittivity Map')
-    ax_eps.set_xlabel('x (µm)')
-    ax_eps.set_ylabel('y (µm)')
+    ax_eps.set_xlabel('x (μm)')
+    ax_eps.set_ylabel('y (μm)')
     ax_eps.set_aspect('equal', adjustable='box')
-<<<<<<< HEAD
     # Optionally, draw outlines on the permittivity map itself, perhaps with a different color
     draw_detailed_outlines(ax_eps, X_mesh, Y_mesh, eps_r, outline_threshold, 'k--') 
     plt.tight_layout()
@@ -372,8 +285,8 @@ def plot_results():
                        headwidth=3, headlength=5, pivot='middle')
     
     ax_Evec.set_title('Electric Field Vectors in Vacuum (Quiver Plot)')
-    ax_Evec.set_xlabel('x (µm)')
-    ax_Evec.set_ylabel('y (µm)')
+    ax_Evec.set_xlabel('x (μm)')
+    ax_Evec.set_ylabel('y (μm)')
     ax_Evec.set_aspect('equal', adjustable='box')
     # Add structure outlines
     draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold, 'k--')
@@ -383,42 +296,111 @@ def plot_results():
     # Plot 5: Profile plot at the center of the vacuum gap
     if y_center_gap_idx is not None:
         V_profile = V[y_center_gap_idx, :]
+        Ex_profile = Ex[y_center_gap_idx, :]
+        Ey_profile = Ey[y_center_gap_idx, :]
         Emag_profile = E_mag[y_center_gap_idx, :]
 
-        fig_profile, ax_profile_V = plt.subplots(figsize=(10, 6))
+        # --- Plot 5a: Combined Potential and E-field magnitude profile ---
+        fig_profile, ax_profile_V = plt.subplots(figsize=(12, 6))
 
         color_V = 'tab:blue'
-        ax_profile_V.set_xlabel('x (µm)')
-        ax_profile_V.set_ylabel('Potential (V)', color=color_V)
-        ax_profile_V.plot(x_coords, V_profile, color=color_V, linestyle='-', label='Potential (V)')
+        ax_profile_V.set_xlabel('x (μm)', fontsize=12)
+        ax_profile_V.set_ylabel('Potential (V)', color=color_V, fontsize=12)
+        ax_profile_V.plot(x_coords, V_profile, color=color_V, linestyle='-', linewidth=2, label='Potential (V)')
         ax_profile_V.tick_params(axis='y', labelcolor=color_V)
         ax_profile_V.grid(True, linestyle=':', alpha=0.7)
 
         ax_profile_Emag = ax_profile_V.twinx()  # instantiate a second axes that shares the same x-axis
         color_Emag = 'tab:red'
-        ax_profile_Emag.set_ylabel('Electric Field Magnitude (V/µm)', color=color_Emag)
-        ax_profile_Emag.plot(x_coords, Emag_profile, color=color_Emag, linestyle='--', label='|E| (V/µm)')
+        ax_profile_Emag.set_ylabel('Electric Field Magnitude (V/μm)', color=color_Emag, fontsize=12)
+        ax_profile_Emag.plot(x_coords, Emag_profile, color=color_Emag, linestyle='--', linewidth=2, label='|E| (V/μm)')
         ax_profile_Emag.tick_params(axis='y', labelcolor=color_Emag)
 
-        fig_profile.suptitle(f'Profile at y = {y_coords[y_center_gap_idx]:.2f} µm (Center of Vacuum Gap)')
+        fig_profile.suptitle(f'Potential and E-field Profile at y = {y_coords[y_center_gap_idx]:.2f} μm (Center of Acceleration Channel)', fontsize=14, fontweight='bold')
         # To add a combined legend:
         lines_V, labels_V = ax_profile_V.get_legend_handles_labels()
         lines_Emag, labels_Emag = ax_profile_Emag.get_legend_handles_labels()
-        ax_profile_Emag.legend(lines_V + lines_Emag, labels_V + labels_Emag, loc='upper right')
+        ax_profile_Emag.legend(lines_V + lines_Emag, labels_V + labels_Emag, loc='upper right', fontsize=10)
         
         fig_profile.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout to make space for suptitle
         plt.savefig(os.path.join(output_folder_name, "center_gap_profile_plot.png"), dpi=300)
-        print(f"Profile plot saved to {os.path.join(output_folder_name, 'center_gap_profile_plot.png')}")
+        print(f"Combined profile plot saved to {os.path.join(output_folder_name, 'center_gap_profile_plot.png')}")
+        
+        # --- Plot 5b: Dedicated E-field components profile ---
+        fig_efield, (ax_ex, ax_ey, ax_emag) = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+        
+        # Ex component
+        ax_ex.plot(x_coords, Ex_profile, color='darkblue', linestyle='-', linewidth=2)
+        ax_ex.set_ylabel('Ex (V/μm)', fontsize=11, fontweight='bold')
+        ax_ex.set_title('Electric Field Components along Acceleration Channel Center', fontsize=13, fontweight='bold')
+        ax_ex.grid(True, linestyle=':', alpha=0.7)
+        ax_ex.axhline(y=0, color='black', linestyle='--', linewidth=0.8, alpha=0.5)
+        
+        # Ey component
+        ax_ey.plot(x_coords, Ey_profile, color='darkgreen', linestyle='-', linewidth=2)
+        ax_ey.set_ylabel('Ey (V/μm)', fontsize=11, fontweight='bold')
+        ax_ey.grid(True, linestyle=':', alpha=0.7)
+        ax_ey.axhline(y=0, color='black', linestyle='--', linewidth=0.8, alpha=0.5)
+        
+        # E magnitude
+        ax_emag.plot(x_coords, Emag_profile, color='darkred', linestyle='-', linewidth=2)
+        ax_emag.set_ylabel('|E| (V/μm)', fontsize=11, fontweight='bold')
+        ax_emag.set_xlabel('x (μm)', fontsize=12)
+        ax_emag.grid(True, linestyle=':', alpha=0.7)
+        
+        # Add info text box with statistics
+        ex_max = np.max(np.abs(Ex_profile))
+        ey_max = np.max(np.abs(Ey_profile))
+        emag_max = np.max(Emag_profile)
+        emag_mean = np.mean(Emag_profile)
+        
+        stats_text = f'Max |Ex|: {ex_max:.3f} V/μm\nMax |Ey|: {ey_max:.3f} V/μm\nMax |E|: {emag_max:.3f} V/μm\nMean |E|: {emag_mean:.3f} V/μm'
+        ax_emag.text(0.98, 0.97, stats_text, transform=ax_emag.transAxes, fontsize=9,
+                    verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round,pad=0.5', fc='lightyellow', alpha=0.8))
+        
+        fig_efield.suptitle(f'at y = {y_coords[y_center_gap_idx]:.2f} μm', fontsize=11, style='italic')
+        fig_efield.tight_layout(rect=[0, 0, 1, 0.98])
+        plt.savefig(os.path.join(output_folder_name, "efield_components_profile_plot.png"), dpi=300)
+        print(f"E-field components profile plot saved to {os.path.join(output_folder_name, 'efield_components_profile_plot.png')}")
+        
+        # --- Plot 5c: E-field magnitude with highlighted regions ---
+        fig_emag_detail, ax_emag_detail = plt.subplots(figsize=(14, 6))
+        
+        ax_emag_detail.plot(x_coords, Emag_profile, color='crimson', linestyle='-', linewidth=2.5, label='|E| magnitude')
+        ax_emag_detail.fill_between(x_coords, 0, Emag_profile, alpha=0.3, color='coral')
+        
+        # Add horizontal line for mean
+        ax_emag_detail.axhline(y=emag_mean, color='navy', linestyle='--', linewidth=1.5, label=f'Mean |E| = {emag_mean:.3f} V/μm', alpha=0.7)
+        
+        ax_emag_detail.set_xlabel('x (μm)', fontsize=13)
+        ax_emag_detail.set_ylabel('Electric Field Magnitude |E| (V/μm)', fontsize=13)
+        ax_emag_detail.set_title(f'Electric Field Magnitude Profile at Channel Center (y = {y_coords[y_center_gap_idx]:.2f} μm)', 
+                                fontsize=14, fontweight='bold')
+        ax_emag_detail.grid(True, linestyle=':', alpha=0.6)
+        ax_emag_detail.legend(loc='best', fontsize=11)
+        
+        # Add annotations for peak field
+        idx_max = np.argmax(Emag_profile)
+        x_max = x_coords[idx_max]
+        ax_emag_detail.annotate(f'Peak: {emag_max:.3f} V/μm\nat x = {x_max:.1f} μm',
+                               xy=(x_max, emag_max), xytext=(x_max + 20, emag_max * 0.8),
+                               arrowprops=dict(arrowstyle='->', color='black', lw=1.5),
+                               fontsize=10, bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.7))
+        
+        fig_emag_detail.tight_layout()
+        plt.savefig(os.path.join(output_folder_name, "efield_magnitude_detail_plot.png"), dpi=300)
+        print(f"Detailed E-field magnitude plot saved to {os.path.join(output_folder_name, 'efield_magnitude_detail_plot.png')}")
 
     # --- Proton Trajectory Analysis ---
     # Initialize h_param_um, it might be set from geo_params if available
     h_param_um = None
     if geo_params and geo_params.get("h") is not None:
-        h_param_um = geo_params.get("h") # Assuming 'h' is in µm in geometry_params.csv for this script's context
+        h_param_um = geo_params.get("h") # Assuming 'h' is in μm in geometry_params.csv for this script's context
     elif x_coords is not None and len(x_coords) > 1:
         # Fallback: try to derive from x_coordinates if not in geo_params
         h_param_um = np.abs(x_coords[1] - x_coords[0])
-        print(f"Warning: 'h' not found in geometry_params.csv. Using h_param_um derived from x_coordinates: {h_param_um:.2f} µm")
+        print(f"Warning: 'h' not found in geometry_params.csv. Using h_param_um derived from x_coordinates: {h_param_um:.2f} μm")
     else:
         print("Warning: 'h' could not be determined from geometry_params.csv or x_coordinates. Proton analysis might be affected or skipped.")
 
@@ -438,20 +420,3 @@ if __name__ == '__main__':
         print(f"Plotting finished. Plots saved to {output_dir} folder.")
     else:
         print("Plotting did not complete successfully.")
-=======
-    # Add structure outlines
-    ax_eps.plot([x_struct_start, x_struct_end], [y_si_bot_end, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_end], [y_vac_end, y_vac_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_start], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_start, x_struct_start], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_end, x_struct_end], [0, y_si_bot_end], 'w--', lw=0.8)
-    ax_eps.plot([x_struct_end, x_struct_end], [y_si_top_start, H_total_sim], 'w--', lw=0.8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "permittivity_map_plot.png"))
-
-    plt.show() # Show all figures
-
-if __name__ == '__main__':
-    plot_results()
-    print("Plotting finished. Plots saved to geometria_piana folder.")
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806

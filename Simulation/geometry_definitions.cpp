@@ -6,6 +6,8 @@
 
 GeometryType stringToGeometryType(const std::string& str) {
     if (str == "piana") return GeometryType::PIANA;
+    if (str == "piana_rastremata") return GeometryType::PIANA_RASTREMATA;
+    if (str == "piana_variabile") return GeometryType::PIANA_VARIABILE;
     if (str == "denti_sfasati_profondi") return GeometryType::DENTI_SFASATI_PROFONDI;
     if (str == "denti_uguali") return GeometryType::DENTI_UGUALI; // Added
     return GeometryType::UNKNOWN;
@@ -14,6 +16,8 @@ GeometryType stringToGeometryType(const std::string& str) {
 std::string geometryTypeToString(GeometryType type) {
     switch (type) {
         case GeometryType::PIANA: return "piana";
+        case GeometryType::PIANA_RASTREMATA: return "piana_rastremata";
+        case GeometryType::PIANA_VARIABILE: return "piana_variabile";
         case GeometryType::DENTI_SFASATI_PROFONDI: return "denti_sfasati_profondi";
         case GeometryType::DENTI_UGUALI: return "denti_uguali"; // Added
         default: return "unknown";
@@ -32,6 +36,36 @@ void initializePianaGeometry(GeometryConfig& config, PianaSpecificParams& piana_
 
     piana_params.y_si_layer_thick = 10.0;
     piana_params.y_vacuum_gap_thick = 10.0;
+}
+
+void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSpecificParams& piana_rastremata_params, double common_h, double eps_sio2, double eps_vac) {
+    config.h = common_h;
+    config.L_total = 320.0;
+    config.x_free_space = 10.0;
+    config.x_structure_len = 300.0;
+    config.H_total_val = 45.0;
+    config.current_tolerance = 1e-3;
+    config.current_eps_material = eps_sio2;
+    config.eps_vacuum_val = eps_vac;
+
+    piana_rastremata_params.y_si_layer_thick_start = 20.0; // Spessore iniziale 20 µm
+    piana_rastremata_params.y_si_layer_thick_end = 14.0;    // Spessore finale 14 µm
+    piana_rastremata_params.y_vacuum_gap_thick = 5.0;     // Gap di vuoto
+}
+
+void initializePianaVariabileGeometry(GeometryConfig& config, PianaVariabileSpecificParams& piana_variabile_params, double common_h, double eps_sio2, double eps_vac) {
+    config.h = common_h;
+    config.L_total = 320.0;
+    config.x_free_space = 10.0;
+    config.x_structure_len = 300.0;
+    config.H_total_val = 30.0;
+    config.current_tolerance = 1e-3;
+    config.current_eps_material = eps_sio2;
+    config.eps_vacuum_val = eps_vac;
+
+    piana_variabile_params.y_si_layer_thick_right = 10.0; // Spessore a destra 10 µm
+    piana_variabile_params.y_si_layer_thick_left = 4.0;   // Spessore a sinistra 4 µm
+    piana_variabile_params.y_vacuum_gap_thick = 10.0;     // Gap di vuoto
 }
 
 void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_sio2, double eps_vac) {
@@ -137,6 +171,84 @@ void setupPianaPermittivity(std::vector<std::vector<double>>& eps_r,
                 if (j >= idx_y_si_top_start && j < Ny) {
                     eps_r[i][j] = config.current_eps_material;
                 }
+            }
+        }
+    }
+}
+
+void setupPianaRastremataPermittivity(std::vector<std::vector<double>>& eps_r,
+                                      const GeometryConfig& config,
+                                      const PianaRastremataSpecificParams& piana_rastremata_params,
+                                      int Nx, int Ny) {
+    const int idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
+    const int idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    
+    for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+            eps_r[i][j] = config.eps_vacuum_val; // Default to vacuum
+            
+            if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
+                // Calcolo della posizione relativa x nella struttura (0 a 1)
+                double x_position_rel = static_cast<double>(i - idx_x_struct_start) / static_cast<double>(idx_x_struct_end - idx_x_struct_start);
+                
+                // Interpolazione lineare dello spessore per ENTRAMBI i layer: da thick_start a thick_end
+                double current_bottom_thickness = piana_rastremata_params.y_si_layer_thick_start + 
+                    x_position_rel * (piana_rastremata_params.y_si_layer_thick_end - piana_rastremata_params.y_si_layer_thick_start);
+                double current_top_thickness = current_bottom_thickness; // Stesso spessore sopra e sotto
+                
+                // Calcolo delle posizioni y: il canale si allarga automaticamente
+                const int idx_y_bottom_end = static_cast<int>(current_bottom_thickness / config.h);
+                const int idx_y_top_start = static_cast<int>((config.H_total_val - current_top_thickness) / config.h);
+                
+                // Bottom Layer (rastremata) - da y=0 a current_bottom_thickness
+                if (j >= 0 && j <= idx_y_bottom_end) {
+                    eps_r[i][j] = config.current_eps_material;
+                }
+                // Top Layer (rastremata) - da (H_total - current_top_thickness) a H_total
+                if (j >= idx_y_top_start && j < Ny) {
+                    eps_r[i][j] = config.current_eps_material;
+                }
+                // Il vacuum gap (canale) è automaticamente la regione tra idx_y_bottom_end e idx_y_top_start
+            }
+        }
+    }
+}
+
+void setupPianaVariabilePermittivity(std::vector<std::vector<double>>& eps_r,
+                                     const GeometryConfig& config,
+                                     const PianaVariabileSpecificParams& piana_variabile_params,
+                                     int Nx, int Ny) {
+    const int idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
+    const int idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    
+    for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+            eps_r[i][j] = config.eps_vacuum_val; // Default to vacuum
+            
+            if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
+                // Calcolo della posizione relativa x nella struttura (0 = sinistra, 1 = destra)
+                double x_position_rel = static_cast<double>(i - idx_x_struct_start) / static_cast<double>(idx_x_struct_end - idx_x_struct_start);
+                
+                // Interpolazione lineare dello spessore da sinistra (4μm) a destra (10μm)
+                // x_position_rel = 0 -> sinistra (thick_left = 4μm)
+                // x_position_rel = 1 -> destra (thick_right = 10μm)
+                double current_bottom_thickness = piana_variabile_params.y_si_layer_thick_left + 
+                    x_position_rel * (piana_variabile_params.y_si_layer_thick_right - piana_variabile_params.y_si_layer_thick_left);
+                double current_top_thickness = current_bottom_thickness; // Stesso spessore sopra e sotto
+                
+                // Calcolo delle posizioni y: il canale si allarga automaticamente
+                const int idx_y_bottom_end = static_cast<int>(current_bottom_thickness / config.h);
+                const int idx_y_top_start = static_cast<int>((config.H_total_val - current_top_thickness) / config.h);
+                
+                // Bottom Layer (variabile) - da y=0 a current_bottom_thickness
+                if (j >= 0 && j <= idx_y_bottom_end) {
+                    eps_r[i][j] = config.current_eps_material;
+                }
+                // Top Layer (variabile) - da (H_total - current_top_thickness) a H_total
+                if (j >= idx_y_top_start && j < Ny) {
+                    eps_r[i][j] = config.current_eps_material;
+                }
+                // Il vacuum gap (canale) è automaticamente la regione tra idx_y_bottom_end e idx_y_top_start
             }
         }
     }
@@ -290,8 +402,10 @@ void saveGeometryParams(const std::string& filename,
                         GeometryType type,
                         const GeometryConfig& config,
                         const PianaSpecificParams* piana_params,
+                        const PianaRastremataSpecificParams* piana_rastremata_params,
+                        const PianaVariabileSpecificParams* piana_variabile_params,
                         const DentiSfasatiProfondiSpecificParams* denti_params,
-                        const DentiUgualiSpecificParams* du_params) { // Added du_params
+                        const DentiUgualiSpecificParams* du_params) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
         std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
@@ -311,6 +425,14 @@ void saveGeometryParams(const std::string& filename,
     if (type == GeometryType::PIANA && piana_params) {
         outfile << "y_si_layer_thick," << piana_params->y_si_layer_thick << std::endl;
         outfile << "y_vacuum_gap_thick," << piana_params->y_vacuum_gap_thick << std::endl;
+    } else if (type == GeometryType::PIANA_RASTREMATA && piana_rastremata_params) {
+        outfile << "y_si_layer_thick_start," << piana_rastremata_params->y_si_layer_thick_start << std::endl;
+        outfile << "y_si_layer_thick_end," << piana_rastremata_params->y_si_layer_thick_end << std::endl;
+        outfile << "y_vacuum_gap_thick," << piana_rastremata_params->y_vacuum_gap_thick << std::endl;
+    } else if (type == GeometryType::PIANA_VARIABILE && piana_variabile_params) {
+        outfile << "y_si_layer_thick_right," << piana_variabile_params->y_si_layer_thick_right << std::endl;
+        outfile << "y_si_layer_thick_left," << piana_variabile_params->y_si_layer_thick_left << std::endl;
+        outfile << "y_vacuum_gap_thick," << piana_variabile_params->y_vacuum_gap_thick << std::endl;
     } else if (type == GeometryType::DENTI_SFASATI_PROFONDI && denti_params) {
         outfile << "y_si_base_height," << denti_params->y_si_base_height << std::endl;
         outfile << "initial_y_teeth_height," << denti_params->initial_y_teeth_height << std::endl;

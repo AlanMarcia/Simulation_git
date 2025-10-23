@@ -640,13 +640,14 @@ int main(int argc, char* argv[]) { // Modified main signature
     std::mt19937 rng(rng_seed);
 
     // Use vacuum gap for y-distribution
-    std::uniform_real_distribution<double> dist_y(20e-6, 30e-6); // y in meters
+    std::uniform_real_distribution<double> dist_y(20e-6, 25e-6); // y in meters
+        
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
         protons[i].id = i; // Assign ID
         protons[i].x = initial_x_position_m; 
         protons[i].y = dist_y(rng); // y in meters
-        protons[i].vx = 0.0; // Initial velocity in m/s
+        protons[i].vx = 437.760; // Initial velocity in m/s, 1 KeV proton
         protons[i].vy = 0.0; // Initial velocity in m/s
         protons[i].active = true;
 

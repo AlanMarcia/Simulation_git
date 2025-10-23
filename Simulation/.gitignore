@@ -1,8 +1,17 @@
 # Ignore all CSV files
 *.csv
-
+/geometria*
 # You might also want to ignore other generated files or build artifacts
 # For example, if your C++ compilation produces .o files or executables without extensions:
 # *.o
 # *.out
 # executable_name
+/programmi
+/Silicon
+/Silicon_D
+/test_convergenza* 
+*.pcm
+*.o
+*.out
+*.exe
+*

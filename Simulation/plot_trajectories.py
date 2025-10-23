@@ -87,6 +87,7 @@ def main(folder_path=None): # Add folder_path argument
     all_trajectories_file = os.path.join(input_base_folder, "all_proton_trajectories.csv") # New single file
     output_plot_file = os.path.join(input_base_folder, "proton_trajectories_plot.png") # Changed to .png
     output_hist_plot_file = os.path.join(input_base_folder, "proton_final_energy_histogram.png") # Changed to .png
+    output_angle_hist_file = os.path.join(input_base_folder, "proton_final_angle_histogram.png") # New histogram for angles
     output_accel_plot_file = os.path.join(input_base_folder, "proton_acceleration_profile.png") # New plot file
     output_vel_plot_file = os.path.join(input_base_folder, "proton_velocity_profile.png") # New plot file for velocity
 
@@ -97,20 +98,20 @@ def main(folder_path=None): # Add folder_path argument
 
     # geom = load_geometry_params(geom_params_file) # geom dimensions are in µm - No longer used for plotting shapes
     eps_r_data = load_2d_csv(eps_r_file) # Expected shape (Ny, Nx)
-    x_coords = load_coordinates(x_coords_file)   # x_coords are in µm
-    y_coords = load_coordinates(y_coords_file)   # y_coords are in µm
+    x_coords = load_coordinates(x_coords_file)   # x_coords are in μm
+    y_coords = load_coordinates(y_coords_file)   # y_coords are in μm
 
     if eps_r_data is None or x_coords is None or y_coords is None:
         print("Could not load necessary data (permittivity, coordinates). Exiting.")
         return
 
-    L_total_sim_um = x_coords[-1] if x_coords else 0 # µm
-    H_total_sim_um = y_coords[-1] if y_coords else 0 # µm
+    L_total_sim_um = x_coords[-1] if x_coords else 0 # μm
+    H_total_sim_um = y_coords[-1] if y_coords else 0 # μm
     
     # Default grid spacing for tolerance, as geom_params is not loaded for 'h'
     # This value should ideally match the 'h' used in the simulation for accurate success check.
     # If geometry_params.csv is available and 'h' is needed, it could be loaded separately for just this value.
-    grid_spacing_h_um = 0.5 # µm, default for tolerance, adjust if needed
+    grid_spacing_h_um = 0.5 # μm, default for tolerance, adjust if needed
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -153,6 +154,7 @@ def main(folder_path=None): # Add folder_path argument
     successful_protons_count = 0
     all_acceleration_data = [] # To store {'x_m': x_position, 'a_mag_mps2': acceleration_magnitude}
     all_velocity_data = [] # To store {'x_m': x_position, 'v_mag_mps': velocity_magnitude}
+    final_angles_deg = []  # To store final trajectory angles for successful protons
 
     # trajectory_files = glob.glob(os.path.join(trajectories_folder, "proton_*_trajectory.csv")) # Removed
       # Load the single trajectory file
@@ -181,7 +183,7 @@ def main(folder_path=None): # Add folder_path argument
         num_protons_in_file = len(proton_ids)
         
         num_trajectories_to_plot = min(num_protons_in_file, 1000)        # Plot a subset of trajectories - optimized
-        # Pre-calculate conversion factor
+        # Pre-calculate conversion factor from m to μm
         convert_to_um = 1e6
         
         # Use batch processing for trajectory plotting
@@ -196,8 +198,9 @@ def main(folder_path=None): # Add folder_path argument
                 df_traj = grouped_trajectories.get_group(proton_id)
                 if not df_traj.empty:
                     # Use numpy arrays directly for better performance
-                    x_vals = df_traj['x_m'].values * convert_to_um
-                    y_vals = df_traj['y_m'].values * convert_to_um
+                    # Note: x_m and y_m are already in meters from proton_simulator.cpp
+                    x_vals = df_traj['x_m'].values * convert_to_um  # Convert from m to μm for plotting
+                    y_vals = df_traj['y_m'].values * convert_to_um  # Convert from m to μm for plotting
                     
                     line, = ax.plot(x_vals, y_vals, linestyle='-', linewidth=0.5, 
                                    alpha=0.7, color='red')
@@ -217,31 +220,37 @@ def main(folder_path=None): # Add folder_path argument
         all_acceleration_data = []
         all_velocity_data = []
         
-        # Convert threshold once
+        # Convert threshold once - L_total_sim_um is in μm, convert to meters for comparison
         x_success_threshold = (L_total_sim_um * 1e-6) - (grid_spacing_h_um * 1e-6 / 2.0)
         
         for proton_id in proton_ids:
             df_traj = grouped_trajectories.get_group(proton_id)
             if not df_traj.empty:
                 # Energy calculation - use vectorized operations and avoid iloc for better performance
+                # Note: x_m and velocities are already in SI units (m, m/s) from proton_simulator.cpp
                 last_point = df_traj.iloc[-1]
                 if last_point['x_m'] >= x_success_threshold:
                     successful_protons_count += 1
-                    # Vectorized calculation for energy
-                    vx_mps = last_point['vx_m_per_s']
-                    vy_mps = last_point['vy_m_per_s']
+                    # Vectorized calculation for energy - all units are already SI
+                    vx_mps = last_point['vx_m_per_s']  # Already in m/s
+                    vy_mps = last_point['vy_m_per_s']  # Already in m/s
                     v_sq_mps = vx_mps**2 + vy_mps**2
-                    ke_joules = 0.5 * M_PROTON_KG * v_sq_mps
+                    ke_joules = 0.5 * M_PROTON_KG * v_sq_mps  # Correct SI calculation
                     ke_eV = ke_joules / E_CHARGE_C
                     final_energies_eV.append(ke_eV)
+                    
+                    # Calculate final trajectory angle (in degrees)
+                    final_angle_rad = np.arctan2(vy_mps, vx_mps)
+                    final_angle_deg = np.degrees(final_angle_rad)
+                    final_angles_deg.append(final_angle_deg)
 
                 # Acceleration calculation - vectorized approach
                 if len(df_traj) >= 2:
-                    # Extract all necessary arrays at once
-                    times = df_traj['time_s'].values
-                    x_positions = df_traj['x_m'].values
-                    vx_mps = df_traj['vx_m_per_s'].values
-                    vy_mps = df_traj['vy_m_per_s'].values
+                    # Extract all necessary arrays at once - all already in SI units
+                    times = df_traj['time_s'].values        # seconds
+                    x_positions = df_traj['x_m'].values     # meters (converted from μm by proton_simulator.cpp)
+                    vx_mps = df_traj['vx_m_per_s'].values   # m/s
+                    vy_mps = df_traj['vy_m_per_s'].values   # m/s
                     
                     # Calculate time differences
                     dt_values = np.diff(times)
@@ -279,10 +288,36 @@ def main(folder_path=None): # Add folder_path argument
         print(f"No trajectory data loaded from {all_trajectories_file}. Skipping trajectory plotting and energy analysis.")
         num_trajectories_to_plot = 0
 
+    # --- Print Summary Statistics ---
+    print("\n" + "="*60)
+    print("PROTON TRAJECTORY ANALYSIS SUMMARY")
+    print("="*60)
+    print(f"Total protons simulated: {num_protons_in_file}")
+    print(f"Successful protons (reached end): {successful_protons_count}")
+    if num_protons_in_file > 0:
+        efficiency = (successful_protons_count / num_protons_in_file) * 100
+        print(f"Transmission efficiency: {efficiency:.2f}%")
+    
+    if final_energies_eV:
+        print(f"\nFinal Energy Statistics (successful protons):")
+        print(f"  Mean energy: {np.mean(final_energies_eV):.2f} eV")
+        print(f"  Std deviation: {np.std(final_energies_eV):.2f} eV")
+        print(f"  Min energy: {np.min(final_energies_eV):.2f} eV")
+        print(f"  Max energy: {np.max(final_energies_eV):.2f} eV")
+        print(f"  Median energy: {np.median(final_energies_eV):.2f} eV")
+    
+    if final_angles_deg:
+        print(f"\nFinal Trajectory Angle Statistics (successful protons):")
+        print(f"  Mean angle: {np.mean(final_angles_deg):.2f}°")
+        print(f"  Std deviation: {np.std(final_angles_deg):.2f}°")
+        print(f"  Min angle: {np.min(final_angles_deg):.2f}°")
+        print(f"  Max angle: {np.max(final_angles_deg):.2f}°")
+    print("="*60 + "\n")
 
-    ax.set_xlabel("X (µm)") # Axis labels remain in µm for visualization
-    ax.set_ylabel("Y (µm)") # Axis labels remain in µm for visualization
-    ax.set_title(f"Proton Trajectories ({num_trajectories_to_plot} of {num_protons_in_file} shown, plotted in µm)")
+
+    ax.set_xlabel("X (μm)") # Axis labels remain in μm for visualization
+    ax.set_ylabel("Y (μm)") # Axis labels remain in μm for visualization
+    ax.set_title(f"Proton Trajectories ({num_trajectories_to_plot} of {num_protons_in_file} shown, plotted in μm)")
     
     # Set plot limits based on the simulation domain (in µm)
     ax.set_xlim(0, L_total_sim_um)
@@ -346,11 +381,51 @@ def main(folder_path=None): # Add folder_path argument
         plt.show() # Show histogram plot
         plt.close(fig_hist)
     else:
-        print("No successful protons found to generate an energy histogram.")    # Plotting acceleration profile - optimized
+        print("No successful protons found to generate an energy histogram.")
+    
+    # Plotting the histogram of final trajectory angles
+    if final_angles_deg:
+        print(f"Generating angle distribution histogram for {len(final_angles_deg)} successful protons...")
+        fig_angle, ax_angle = plt.subplots(figsize=(10, 6))
+        ax_angle.hist(final_angles_deg, bins=50, edgecolor='black', alpha=0.75, color='coral')
+        ax_angle.set_xlabel("Final Trajectory Angle (degrees)")
+        ax_angle.set_ylabel("Number of Protons")
+        ax_angle.set_title("Histogram of Final Trajectory Angles of Successful Protons")
+        ax_angle.grid(True, linestyle=':', alpha=0.7)
+        
+        # Calculate and display angle statistics
+        mean_angle = np.mean(final_angles_deg)
+        std_angle = np.std(final_angles_deg)
+        min_angle = np.min(final_angles_deg)
+        max_angle = np.max(final_angles_deg)
+        median_angle = np.median(final_angles_deg)
+        
+        stats_text_angle = f'Mean: {mean_angle:.2f}°\nStd Dev: {std_angle:.2f}°\nMedian: {median_angle:.2f}°\nMin: {min_angle:.2f}°\nMax: {max_angle:.2f}°'
+        
+        ax_angle.text(0.95, 0.95, stats_text_angle, transform=ax_angle.transAxes, fontsize=9,
+                     verticalalignment='top', horizontalalignment='right',
+                     bbox=dict(boxstyle='round,pad=0.5', fc='lightyellow', alpha=0.5))
+        
+        # Add a vertical line at 0 degrees for reference
+        ax_angle.axvline(x=0, color='red', linestyle='--', linewidth=1.5, alpha=0.7, label='0° (horizontal)')
+        ax_angle.legend(loc='upper left')
+        
+        plt.tight_layout()
+        try:
+            plt.savefig(output_angle_hist_file, dpi=300)
+            print(f"Angle distribution histogram saved to {output_angle_hist_file}")
+        except Exception as e:
+            print(f"Error saving angle histogram: {e}")
+        plt.show()
+        plt.close(fig_angle)
+    else:
+        print("No successful protons found to generate an angle histogram.")
+        # Plotting acceleration profile - optimized
     if all_acceleration_data:
         # Convert to numpy arrays directly for faster processing
-        x_vals = np.array([item['x_m'] for item in all_acceleration_data])
-        a_vals = np.array([item['a_mag_mps2'] for item in all_acceleration_data])
+        # Note: x_m values are in meters, a_mag_mps2 are in m/s²
+        x_vals = np.array([item['x_m'] for item in all_acceleration_data])  # meters
+        a_vals = np.array([item['a_mag_mps2'] for item in all_acceleration_data])  # m/s²
         
         # Handle infinities and NaNs - vectorized operation
         valid_indices = np.isfinite(a_vals)
@@ -360,6 +435,7 @@ def main(folder_path=None): # Add folder_path argument
         if len(x_vals) > 0:
             num_bins = 100 # Number of bins along x-axis
             # Ensure x_bins cover the full range of x_coords for context
+            # x_coords are in μm, convert to meters
             min_x_coord_m = x_coords[0] * 1e-6 if x_coords else np.min(x_vals)
             max_x_coord_m = x_coords[-1] * 1e-6 if x_coords else np.max(x_vals)
 
@@ -409,7 +485,7 @@ def main(folder_path=None): # Add folder_path argument
                     ax_accel.plot(x_plot_um, mean_vals, color='dodgerblue', linestyle='-', linewidth=1.5, label='Mean Acceleration Magnitude')
                     ax_accel.fill_between(x_plot_um, mean_vals - std_vals, mean_vals + std_vals, color='lightskyblue', alpha=0.4, label='Std Dev (Fluctuation)')
                     
-                    ax_accel.set_xlabel("X-position (µm)")
+                    ax_accel.set_xlabel("X-position (μm)")
                     ax_accel.set_ylabel("Acceleration Magnitude (m/s²)")
                     ax_accel.set_title("Mean Proton Acceleration Magnitude vs. X-position")
                     ax_accel.legend(loc='upper right')
@@ -435,8 +511,9 @@ def main(folder_path=None): # Add folder_path argument
         print("No acceleration data calculated to generate a profile plot.")    # Plotting velocity profile - optimized using numpy
     if all_velocity_data:
         # Convert to numpy arrays directly for faster processing
-        x_vals_vel = np.array([item['x_m'] for item in all_velocity_data])
-        v_vals = np.array([item['v_mag_mps'] for item in all_velocity_data])
+        # Note: x_m values are in meters, v_mag_mps are in m/s
+        x_vals_vel = np.array([item['x_m'] for item in all_velocity_data])  # meters
+        v_vals = np.array([item['v_mag_mps'] for item in all_velocity_data])  # m/s
         
         # Handle infinities and NaNs in one step
         valid_indices_vel = np.isfinite(v_vals)
@@ -445,6 +522,7 @@ def main(folder_path=None): # Add folder_path argument
         
         if len(x_vals_vel) > 0:
             num_bins_vel = 100 # Number of bins along x-axis for velocity
+            # x_coords are in μm, convert to meters for comparison
             min_x_coord_m_vel = x_coords[0] * 1e-6 if x_coords else np.min(x_vals_vel)
             max_x_coord_m_vel = x_coords[-1] * 1e-6 if x_coords else np.max(x_vals_vel)
 
@@ -488,13 +566,13 @@ def main(folder_path=None): # Add folder_path argument
                 if len(bin_centers_vel) > 0:
                     fig_vel, ax_vel = plt.subplots(figsize=(12, 7))
                     
-                    x_plot_um_vel = bin_centers_vel * 1e6  # Convert to µm
+                    x_plot_um_vel = bin_centers_vel * 1e6  # Convert from meters to μm for plotting
                     
                     # Efficient plotting
                     ax_vel.plot(x_plot_um_vel, mean_vals_vel, color='green', linestyle='-', linewidth=1.5, label='Mean Velocity Magnitude')
                     ax_vel.fill_between(x_plot_um_vel, mean_vals_vel - std_vals_vel, mean_vals_vel + std_vals_vel, color='lightgreen', alpha=0.4, label='Std Dev (Fluctuation)')
                     
-                    ax_vel.set_xlabel("X-position (µm)")
+                    ax_vel.set_xlabel("X-position (μm)")
                     ax_vel.set_ylabel("Velocity Magnitude (m/s)")
                     ax_vel.set_title("Mean Proton Velocity Magnitude vs. X-position")
                     ax_vel.legend(loc='upper right')
@@ -558,6 +636,7 @@ def main(folder_path=None): # Add folder_path argument
             # Add structure contour if available - do this once
             if eps_r_data is not None and outline_threshold is not None:
                 # Convert coordinates efficiently using broadcasting
+                # x_coords and y_coords are in μm, convert to meters for mesh
                 x_coords_m = np.array(x_coords)[:, np.newaxis] * 1e-6  # Add dimension for broadcasting
                 y_coords_m = np.array(y_coords)[np.newaxis, :] * 1e-6  # Add dimension for broadcasting
                 X_mesh_anim, Y_mesh_anim = np.meshgrid(x_coords_m.flatten(), y_coords_m.flatten())

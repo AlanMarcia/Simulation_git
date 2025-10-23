@@ -8,6 +8,8 @@
 // Enum per i tipi di geometria
 enum class GeometryType {
     PIANA,
+    PIANA_RASTREMATA, // Geometria planare rastremata (da 10µm a 4µm)
+    PIANA_VARIABILE,  // Geometria piana con spessore variabile da 10µm (destra) a 4µm (sinistra)
     DENTI_SFASATI_PROFONDI,
     DENTI_UGUALI, 
     DENTI_SFASATI_PROFONDI_NM, // Aggiunto per la nuova geometria
@@ -37,6 +39,20 @@ struct GeometryConfig {
 struct PianaSpecificParams {
     double y_si_layer_thick; // µm
     double y_vacuum_gap_thick; // µm
+};
+
+// Parametri specifici per la geometria "piana_rastremata"
+struct PianaRastremataSpecificParams {
+    double y_si_layer_thick_start; // µm - spessore iniziale (10 µm)
+    double y_si_layer_thick_end;   // µm - spessore finale (4 µm)
+    double y_vacuum_gap_thick;     // µm - spessore del gap di vuoto
+};
+
+// Parametri specifici per la geometria "piana_variabile"
+struct PianaVariabileSpecificParams {
+    double y_si_layer_thick_right; // µm - spessore a destra (10 µm)
+    double y_si_layer_thick_left;  // µm - spessore a sinistra (4 µm)
+    double y_vacuum_gap_thick;     // µm - spessore del gap di vuoto
 };
 
 // Parametri specifici per la geometria "denti_sfasati_profondi"
@@ -81,6 +97,8 @@ std::string geometryTypeToString(GeometryType type);
 
 // Funzioni di inizializzazione dei parametri
 void initializePianaGeometry(GeometryConfig& config, PianaSpecificParams& piana_params, double common_h, double eps_sio2, double eps_vac);
+void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSpecificParams& piana_rastremata_params, double common_h, double eps_sio2, double eps_vac);
+void initializePianaVariabileGeometry(GeometryConfig& config, PianaVariabileSpecificParams& piana_variabile_params, double common_h, double eps_sio2, double eps_vac);
 void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_si, double eps_vac);
 void initializeDentiSfasatiProfondiNmGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_si, double eps_vac);
 void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificParams& du_params, double common_h, double eps_si, double eps_vac); // Added
@@ -94,6 +112,16 @@ void setupPianaPermittivity(std::vector<std::vector<double>>& eps_r,
                             const GeometryConfig& config,
                             const PianaSpecificParams& piana_params,
                             int Nx, int Ny);
+
+void setupPianaRastremataPermittivity(std::vector<std::vector<double>>& eps_r,
+                                      const GeometryConfig& config,
+                                      const PianaRastremataSpecificParams& piana_rastremata_params,
+                                      int Nx, int Ny);
+
+void setupPianaVariabilePermittivity(std::vector<std::vector<double>>& eps_r,
+                                     const GeometryConfig& config,
+                                     const PianaVariabileSpecificParams& piana_variabile_params,
+                                     int Nx, int Ny);
 
 void setupDentiSfasatiProfondiPermittivity(std::vector<std::vector<double>>& eps_r,
                                            const GeometryConfig& config,
@@ -124,6 +152,8 @@ void saveGeometryParams(const std::string& filename,
                         GeometryType type,
                         const GeometryConfig& config,
                         const PianaSpecificParams* piana_params, // Puntatore, può essere nullptr
+                        const PianaRastremataSpecificParams* piana_rastremata_params, // Puntatore, può essere nullptr
+                        const PianaVariabileSpecificParams* piana_variabile_params, // Puntatore, può essere nullptr
                         const DentiSfasatiProfondiSpecificParams* denti_params, // Puntatore, può essere nullptr
                         const DentiUgualiSpecificParams* du_params); // Added, Puntatore, può essere nullptr
 

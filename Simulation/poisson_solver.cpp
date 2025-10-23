@@ -6,7 +6,6 @@
 #include <string>
 #include <algorithm> // For std::min, std::max
 #include <omp.h>     // For OpenMP
-<<<<<<< HEAD
 #include "geometry_definitions.h" // Includi il nuovo header
 
 #if defined(_WIN32)
@@ -25,18 +24,10 @@
 // Helper function to save a 2D vector to a CSV file with optimized I/O
 void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
     std::ofstream outfile(filename, std::ios::out | std::ios::binary);
-=======
-#include <filesystem> // For creating directories
-
-// Helper function to save a 2D vector to a CSV file
-void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& filename) {
-    std::ofstream outfile(filename);
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     if (!outfile.is_open()) {
         std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
         return;
     }
-<<<<<<< HEAD
     
     // Set buffer size to improve I/O performance
     const int BUFFER_SIZE = 16384; // 16KB buffer
@@ -68,32 +59,17 @@ void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& 
         outfile << rowStream.str();
     }
     
-=======
-    for (size_t j = 0; j < data[0].size(); ++j) { // Iterate over y first for typical CSV/plot orientation
-        for (size_t i = 0; i < data.size(); ++i) { // Then x
-            outfile << data[i][j] << (i == data.size() - 1 ? "" : ",");
-        }
-        outfile << std::endl;
-    }
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     outfile.close();
     std::cout << "Data saved to " << filename << std::endl;
 }
 
-<<<<<<< HEAD
 // Helper function to save a 1D vector to a CSV file with optimized I/O
 void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& filename) {
     std::ofstream outfile(filename, std::ios::out | std::ios::binary);
-=======
-// Helper function to save a 1D vector to a CSV file (single column)
-void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& filename) {
-    std::ofstream outfile(filename);
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     if (!outfile.is_open()) {
         std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
         return;
     }
-<<<<<<< HEAD
     
     // Set buffer size
     const int BUFFER_SIZE = 8192; // 8KB buffer
@@ -110,16 +86,10 @@ void saveCoordinatesToCSV(const std::vector<double>& coords, const std::string& 
     }
     outfile << dataStream.str();
     
-=======
-    for (size_t i = 0; i < coords.size(); ++i) {
-        outfile << coords[i] << std::endl;
-    }
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     outfile.close();
     std::cout << "Coordinates saved to " << filename << std::endl;
 }
 
-<<<<<<< HEAD
 // La funzione saveGeometryParamsToCSV è stata spostata in geometry_definitions.cpp e rinominata saveGeometryParams
 
 int main(int argc, char* argv[]) { 
@@ -142,71 +112,121 @@ int main(int argc, char* argv[]) {
     if (current_geometry_type == GeometryType::UNKNOWN) {
         std::cerr << "Error: Unknown geometry type '" << geometry_type_str << "'. Exiting." << std::endl;
         return 1;
-=======
-// Helper function to save geometry parameters
-void saveGeometryParamsToCSV(const std::string& filename,
-                             double h_val,
-                             double x_fs, double x_sl,
-                             double y_slt, double y_vgt,
-                             double H_tot) {
-    std::ofstream outfile(filename);
-    if (!outfile.is_open()) {
-        std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
-        return;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     }
-    outfile << std::fixed << std::setprecision(10); // Ensure precision
-    outfile << "h," << h_val << std::endl;
-    outfile << "x_free_space," << x_fs << std::endl;
-    outfile << "x_structure_len," << x_sl << std::endl;
-    outfile << "y_si_layer_thick," << y_slt << std::endl;
-    outfile << "y_vacuum_gap_thick," << y_vgt << std::endl;
-    outfile << "H_total," << H_tot << std::endl;
-    outfile.close();
-    std::cout << "Geometry parameters saved to " << filename << std::endl;
-}
+    
+    std::cout << "Selected output folder: " << output_folder_name << std::endl;
+    std::cout << "Selected geometry type: " << geometryTypeToString(current_geometry_type) << std::endl;
 
+    const std::string base_simulation_dir = "/mnt/c/Users/admin/Desktop/Simulation_git/Simulation/";
+    const std::string output_folder = base_simulation_dir + output_folder_name; // Full path to final output directory
 
-int main() {
-    // --- Parameters ---
-<<<<<<< HEAD
-    const double h = 0.5; // Grid spacing in micrometers (µm)
-=======
-    const double h = 1; // Grid spacing in micrometers (µm)
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
+    // --- Create Output Directories Recursively ---
+    // This section ensures that if output_folder_name is "A/B", both "base_simulation_dir/A" 
+    // and "base_simulation_dir/A/B" are created if they don't exist.
+    std::string path_being_built = base_simulation_dir;
+    // Ensure base_simulation_dir exists (typically a given, but good for full robustness check if needed)
+    // For this solution, we assume base_simulation_dir exists and is writable.
+    // We also ensure base_simulation_dir ends with a slash for proper concatenation.
+    if (!path_being_built.empty() && path_being_built.back() != '/') {
+        path_being_built += '/';
+    }
 
-    // Dimensions in µm
-    const double L_total = 320.0;
-    const double H_total = 30.0;
+    if (output_folder_name.empty()) {
+        // If output_folder_name is empty, output_folder is just base_simulation_dir.
+        // Check if base_simulation_dir itself exists and is a directory.
+        struct STAT_STRUCT info;
+        if (STAT_FUNC(base_simulation_dir.c_str(), &info) != 0) {
+            std::cerr << "Error: Base simulation directory " << base_simulation_dir << " does not exist. Exiting." << std::endl;
+            return 1;
+        } else if (!(info.st_mode & S_IFDIR)) {
+            std::cerr << "Error: Path " << base_simulation_dir << " is not a directory. Exiting." << std::endl;
+            return 1;
+        }
+    } else {
+        size_t start = 0;
+        size_t end = 0;
+        std::string current_segment_to_process = output_folder_name;
 
-    const double x_free_space = 10.0;
-    const double x_structure_len = 300.0;
-    const double y_si_layer_thick = 10.0;
-    const double y_vacuum_gap_thick = 10.0;
+        // Remove trailing slash from current_segment_to_process if present, to avoid empty last component
+        if (!current_segment_to_process.empty() && current_segment_to_process.back() == '/') {
+            current_segment_to_process.pop_back();
+        }
+        
+        if (!current_segment_to_process.empty()) { // Proceed only if there are segments to create
+            while (true) {
+                // Find the next path separator
+                end = current_segment_to_process.find('/', start);
+                
+                // Extract the current directory component
+                std::string dir_component;
+                if (end == std::string::npos) { // Last component
+                    dir_component = current_segment_to_process.substr(start);
+                } else { // Intermediate component
+                    dir_component = current_segment_to_process.substr(start, end - start);
+                }
 
-    // SOR parameters
-    const double omega = 1.8; // Relaxation factor
-    const double tolerance = 1e-5; // Convergence tolerance
-<<<<<<< HEAD
-    const int max_iterations = 50000;
-=======
-    const int max_iterations = 500;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
+                if (!dir_component.empty()) { // Avoid issues with empty components (e.g., "A//B")
+                    // Append the component to the path being built
+                    // path_being_built should already have a trailing slash from base_simulation_dir or previous iteration
+                    path_being_built += dir_component;
 
-    // Material properties (relative permittivity)
-    const double eps_si = 11.7;
-    const double eps_vac = 1.0;
+                    struct STAT_STRUCT info;
+                    if (STAT_FUNC(path_being_built.c_str(), &info) != 0) { // If path component does not exist
+                        if (MKDIR(path_being_built.c_str()) != 0) { // Attempt to create it
+                            std::cerr << "Error: Could not create directory " << path_being_built << ". Exiting." << std::endl;
+                            return 1; // Critical error, cannot proceed
+                        }
+                        std::cout << "Created directory: " << path_being_built << std::endl;
+                    } else if (!(info.st_mode & S_IFDIR)) { // If path exists but is not a directory
+                        std::cerr << "Error: Path " << path_being_built << " exists but is not a directory. Exiting." << std::endl;
+                        return 1; // Critical error
+                    }
+                    // Add slash for the next component, only if it's not the last one
+                    if (end != std::string::npos) {
+                         path_being_built += '/';
+                    }
+                }
+                
+                if (end == std::string::npos) {
+                    break; // All components processed
+                }
+                start = end + 1; // Move to the character after the slash
+                // If start is at or beyond the end of the string (e.g. "A/B/"), no more components.
+                if (start >= current_segment_to_process.length()) {
+                    break;
+                }
+            }
+        }
+    }
+    // At this point, the full 'output_folder' path should exist.
 
-<<<<<<< HEAD
+    // --- Common Parameters ---
+    const double common_h_param = 0.1; // Grid spacing in micrometers (µm)
+    const double V_left_bc = 0.0;  // Volts
+    const double V_right_bc = -100000.0; // Volts
+    const double omega_sor = 1.8; // Relaxation factor
+    const int max_iter_sor = 50000000;
+    
+    // Material properties
+    const double eps_sio2_mat = 3.9;
+    const double eps_si_mat = 11.7;
+    const double eps_vac_mat = 1.0;
+
     // Dichiarazione delle strutture dei parametri
     GeometryConfig geom_config;
     PianaSpecificParams piana_geom_params;
+    PianaRastremataSpecificParams piana_rastremata_params;
+    PianaVariabileSpecificParams piana_variabile_params;
     DentiSfasatiProfondiSpecificParams denti_geom_params;
     DentiUgualiSpecificParams du_geom_params; // Added
 
     // Inizializzazione dei parametri basata sul tipo di geometria
     if (current_geometry_type == GeometryType::PIANA) {
         initializePianaGeometry(geom_config, piana_geom_params, common_h_param, eps_sio2_mat, eps_vac_mat);
+    } else if (current_geometry_type == GeometryType::PIANA_RASTREMATA) {
+        initializePianaRastremataGeometry(geom_config, piana_rastremata_params, common_h_param, eps_sio2_mat, eps_vac_mat);
+    } else if (current_geometry_type == GeometryType::PIANA_VARIABILE) {
+        initializePianaVariabileGeometry(geom_config, piana_variabile_params, common_h_param, eps_sio2_mat, eps_vac_mat);
     } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
         initializeDentiSfasatiProfondiGeometry(geom_config, denti_geom_params, common_h_param, eps_sio2_mat, eps_vac_mat);
     } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
@@ -221,12 +241,17 @@ int main() {
 
     // Save geometry parameters
     if (current_geometry_type == GeometryType::PIANA) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, &piana_geom_params, nullptr, nullptr);
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, &piana_geom_params, nullptr, nullptr, nullptr, nullptr);
+    } else if (current_geometry_type == GeometryType::PIANA_RASTREMATA) {
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &piana_rastremata_params, nullptr, nullptr, nullptr);
+    } else if (current_geometry_type == GeometryType::PIANA_VARIABILE) {
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, &piana_variabile_params, nullptr, nullptr);
     } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, &du_geom_params);
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, nullptr, &denti_geom_params, nullptr);
+    } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, nullptr, nullptr, &du_geom_params);
     } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI_NM) {
-        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, &denti_geom_params, nullptr);
+        saveGeometryParams(output_folder + "/geometry_params.csv", current_geometry_type, geom_config, nullptr, nullptr, nullptr, &denti_geom_params, nullptr);
     } else {
         std::cerr << "Error: Unsupported geometry type for saving parameters." << std::endl;
         return 1; // Exit if geometry type is unsupported
@@ -270,6 +295,10 @@ int main() {
     // --- Define Material Regions ---
     if (current_geometry_type == GeometryType::PIANA) {
         setupPianaPermittivity(eps_r, geom_config, piana_geom_params, Nx, Ny);
+    } else if (current_geometry_type == GeometryType::PIANA_RASTREMATA) {
+        setupPianaRastremataPermittivity(eps_r, geom_config, piana_rastremata_params, Nx, Ny);
+    } else if (current_geometry_type == GeometryType::PIANA_VARIABILE) {
+        setupPianaVariabilePermittivity(eps_r, geom_config, piana_variabile_params, Nx, Ny);
     } else if (current_geometry_type == GeometryType::DENTI_SFASATI_PROFONDI) {
         setupDentiSfasatiProfondiPermittivity(eps_r, geom_config, denti_geom_params, Nx, Ny);
     } else if (current_geometry_type == GeometryType::DENTI_UGUALI) { // Added
@@ -284,6 +313,12 @@ int main() {
     // --- SOR Iteration ---
     double tolerance_sor = geom_config.current_tolerance;
     double max_diff_iter = 0.0;
+    
+    // Sistema di convergenza avanzato: controlla ultimi 10 valori
+    const int convergence_window = 10;
+    std::vector<double> last_diffs(convergence_window, 1e6); // Inizializza con valori alti
+    int no_improvement_count = 0;
+    const double relative_improvement_threshold = 1e-12; // Soglia per miglioramento relativo (0.01%)
     
     // Pre-compute 1.0 - omega_sor once outside the loop
     const double one_minus_omega = 1.0 - omega_sor;
@@ -333,120 +368,11 @@ int main() {
                         V[i][j] = v_new;
                         
                         max_diff_iter = std::max(max_diff_iter, current_point_diff);
-=======
-    // Boundary conditions
-    const double V_left = 0.0;  // Volts
-    const double V_right = -1000.0; // Volts
-
-    // Create output folder
-    const std::string output_folder = "geometria_piana";
-    std::filesystem::create_directory(output_folder);
-
-    // Save geometry parameters before extensive calculations
-    saveGeometryParamsToCSV(output_folder + "/geometry_params.csv", 
-                            h, 
-                            x_free_space, x_structure_len, 
-                            y_si_layer_thick, y_vacuum_gap_thick, 
-                            H_total);
-
-    // --- Grid Setup ---
-    const int Nx = static_cast<int>(L_total / h) + 1;
-    const int Ny = static_cast<int>(H_total / h) + 1;
-
-    std::vector<double> x_coords(Nx);
-    std::vector<double> y_coords(Ny);
-    for (int i = 0; i < Nx; ++i) x_coords[i] = i * h;
-    for (int j = 0; j < Ny; ++j) y_coords[j] = j * h;
-
-    std::vector<std::vector<double>> V(Nx, std::vector<double>(Ny, 0.0));
-    std::vector<std::vector<double>> eps_r(Nx, std::vector<double>(Ny, eps_vac));
-    std::vector<std::vector<bool>> fixed_potential_mask(Nx, std::vector<bool>(Ny, false));
-
-    // --- Define Material Regions ---
-    const int idx_x_struct_start = static_cast<int>(x_free_space / h);
-    const int idx_x_struct_end = static_cast<int>((x_free_space + x_structure_len) / h);
-
-    const int idx_y_si_bot_end = static_cast<int>(y_si_layer_thick / h);
-    const int idx_y_vac_start = idx_y_si_bot_end + 1; // Not strictly needed for assignment if default is vac
-    const int idx_y_vac_end = static_cast<int>((y_si_layer_thick + y_vacuum_gap_thick) / h);
-    const int idx_y_si_top_start = idx_y_vac_end; // Note: if h=1, vac_end is 20, si_top_start is 20.
-
-    for (int i = idx_x_struct_start; i <= idx_x_struct_end; ++i) {
-        // Bottom Silicon layer
-        for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-            eps_r[i][j] = eps_si;
-        }
-        // Top Silicon layer
-        for (int j = idx_y_si_top_start; j < Ny; ++j) {
-            eps_r[i][j] = eps_si;
-        }
-    }
-    
-    std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << std::endl;
-    std::cout << "Structure x-indices: " << idx_x_struct_start << " to " << idx_x_struct_end << std::endl;
-    std::cout << "Bottom Si y-indices: 0 to " << idx_y_si_bot_end << std::endl;
-    std::cout << "Vacuum y-indices (approx): " << idx_y_si_bot_end + 1 << " to " << idx_y_si_top_start -1 << std::endl;
-    std::cout << "Top Si y-indices: " << idx_y_si_top_start << " to " << Ny - 1 << std::endl;
-
-
-    // --- Boundary Conditions ---
-    // Left side of Silicon layers (0V)
-    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-        V[idx_x_struct_start][j] = V_left;
-        fixed_potential_mask[idx_x_struct_start][j] = true;
-    }
-    for (int j = idx_y_si_top_start; j < Ny; ++j) {
-        V[idx_x_struct_start][j] = V_left;
-        fixed_potential_mask[idx_x_struct_start][j] = true;
-    }
-
-    // Right side of Silicon layers (-1kV)
-    for (int j = 0; j <= idx_y_si_bot_end; ++j) {
-        V[idx_x_struct_end][j] = V_right;
-        fixed_potential_mask[idx_x_struct_end][j] = true;
-    }
-    for (int j = idx_y_si_top_start; j < Ny; ++j) {
-        V[idx_x_struct_end][j] = V_right;
-        fixed_potential_mask[idx_x_struct_end][j] = true;
-    }
-
-    // --- SOR Iteration ---
-    for (int iteration = 0; iteration < max_iterations; ++iteration) {
-        double max_diff_iter = 0.0; // Reset for each iteration, OpenMP reduction will use this
-
-        // Phase 1: Update "red" points ((i+j) % 2 == 0)
-        #pragma omp parallel for reduction(max:max_diff_iter)
-        for (int i = 1; i < Nx - 1; ++i) {
-            for (int j = 1; j < Ny - 1; ++j) {
-                if ((i + j) % 2 == 0) { // "Red" points
-                    if (fixed_potential_mask[i][j]) {
-                        continue;
-                    }
-
-                    double eps_ij = eps_r[i][j];
-                    double eps_e = (eps_ij + eps_r[i+1][j]) / 2.0;
-                    double eps_w = (eps_ij + eps_r[i-1][j]) / 2.0;
-                    double eps_n = (eps_ij + eps_r[i][j+1]) / 2.0;
-                    double eps_s = (eps_ij + eps_r[i][j-1]) / 2.0;
-                    
-                    double sum_eps = eps_e + eps_w + eps_n + eps_s;
-                    if (sum_eps == 0) continue;
-
-                    double val_GS = (eps_e * V[i+1][j] + eps_w * V[i-1][j] +
-                                     eps_n * V[i][j+1] + eps_s * V[i][j-1]) / sum_eps;
-                    
-                    double v_old_ij = V[i][j];
-                    V[i][j] = (1.0 - omega) * v_old_ij + omega * val_GS;
-                    double current_point_diff = std::abs(V[i][j] - v_old_ij);
-                    if (current_point_diff > max_diff_iter) {
-                        max_diff_iter = current_point_diff;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
                     }
                 }
             }
         }
 
-<<<<<<< HEAD
         // Phase 2: Update "black" points
         #pragma omp parallel for reduction(max:max_diff_iter) schedule(static)
         for (int i = 1; i < Nx - 1; ++i) {
@@ -489,40 +415,11 @@ int main() {
                         V[i][j] = v_new;
                         
                         max_diff_iter = std::max(max_diff_iter, current_point_diff);
-=======
-        // Phase 2: Update "black" points ((i+j) % 2 != 0)
-        #pragma omp parallel for reduction(max:max_diff_iter)
-        for (int i = 1; i < Nx - 1; ++i) {
-            for (int j = 1; j < Ny - 1; ++j) {
-                if ((i + j) % 2 != 0) { // "Black" points
-                    if (fixed_potential_mask[i][j]) {
-                        continue;
-                    }
-
-                    double eps_ij = eps_r[i][j];
-                    double eps_e = (eps_ij + eps_r[i+1][j]) / 2.0;
-                    double eps_w = (eps_ij + eps_r[i-1][j]) / 2.0;
-                    double eps_n = (eps_ij + eps_r[i][j+1]) / 2.0;
-                    double eps_s = (eps_ij + eps_r[i][j-1]) / 2.0;
-                    
-                    double sum_eps = eps_e + eps_w + eps_n + eps_s;
-                    if (sum_eps == 0) continue;
-
-                    double val_GS = (eps_e * V[i+1][j] + eps_w * V[i-1][j] +
-                                     eps_n * V[i][j+1] + eps_s * V[i][j-1]) / sum_eps;
-                    
-                    double v_old_ij = V[i][j];
-                    V[i][j] = (1.0 - omega) * v_old_ij + omega * val_GS;
-                    double current_point_diff = std::abs(V[i][j] - v_old_ij);
-                    if (current_point_diff > max_diff_iter) {
-                        max_diff_iter = current_point_diff;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
                     }
                 }
             }
         }
 
-<<<<<<< HEAD
         // Apply Neumann BCs to outer simulation boundaries more efficiently
         // Left and right boundaries
         #pragma omp parallel for
@@ -546,18 +443,6 @@ int main() {
             if (!fixed_potential_mask[i][Ny - 1]) {
                 V[i][Ny - 1] = V[i][Ny - 2];
             }
-=======
-        // Apply Neumann BCs to outer simulation boundaries (dV/dn = 0 -> V_boundary = V_neighbor_inside)
-        #pragma omp parallel for
-        for (int j_idx = 0; j_idx < Ny; ++j_idx) {
-            if (!fixed_potential_mask[0][j_idx]) V[0][j_idx] = V[1][j_idx];
-            if (!fixed_potential_mask[Nx - 1][j_idx]) V[Nx - 1][j_idx] = V[Nx - 2][j_idx];
-        }
-        #pragma omp parallel for
-        for (int i_idx = 0; i_idx < Nx; ++i_idx) {
-            if (!fixed_potential_mask[i_idx][0]) V[i_idx][0] = V[i_idx][1];
-            if (!fixed_potential_mask[i_idx][Ny - 1]) V[i_idx][Ny - 1] = V[i_idx][Ny - 2];
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
         }
         
         // Re-apply fixed potentials (important if fixed BCs are on the Neumann boundary itself)
@@ -573,14 +458,46 @@ int main() {
 
 
         if ((iteration + 1) % 100 == 0) {
-            std::cout << "Iteration " << iteration + 1 << ", Max Potential Change: " << std::scientific << max_diff_iter << std::fixed << std::endl;
+            std::cout << "Iteration " << iteration + 1 << ", Max Potential Change: " << std::scientific << max_diff_iter << std::fixed;
+            if (iteration >= convergence_window) {
+                std::cout << " [No improvement count: " << no_improvement_count << "]";
+            }
+            std::cout << std::endl;
         }
 
-<<<<<<< HEAD
+        // Controllo di convergenza standard
         if (max_diff_iter < tolerance_sor) { // Usa tolerance_sor
             std::cout << "Converged after " << iteration + 1 << " iterations." << std::endl;
             break;
         }
+        
+        // Sistema di convergenza avanzato: controlla stagnazione nelle ultime 10 iterazioni
+        int current_idx = iteration % convergence_window;
+        double previous_diff = last_diffs[current_idx];
+        last_diffs[current_idx] = max_diff_iter;
+        
+        // Dopo almeno 'convergence_window' iterazioni, controlla se c'è stagnazione
+        if (iteration >= convergence_window) {
+            // Calcola il miglioramento relativo rispetto a 10 iterazioni fa
+            double relative_improvement = 0.0;
+            if (previous_diff > 1e-12) { // Evita divisione per zero
+                relative_improvement = (previous_diff - max_diff_iter) / previous_diff;
+            }
+            
+            if (relative_improvement < relative_improvement_threshold) {
+                no_improvement_count++;
+                if (no_improvement_count >= convergence_window) {
+                    std::cout << "Convergenza fermate dopo " << iteration + 1 << " iterazioni: ";
+                    std::cout << "nessun miglioramento significativo nelle ultime " << convergence_window << " iterazioni." << std::endl;
+                    std::cout << "Miglioramento relativo: " << std::scientific << relative_improvement << std::fixed;
+                    std::cout << " (soglia: " << std::scientific << relative_improvement_threshold << std::fixed << ")" << std::endl;
+                    break;
+                }
+            } else {
+                no_improvement_count = 0; // Reset counter se c'è miglioramento
+            }
+        }
+        
         if (iteration == max_iter_sor - 1) { // Usa max_iter_sor
              std::cout << "Max iterations (" << max_iter_sor << ") reached. Max diff: " << std::scientific << max_diff_iter << std::fixed << std::endl;
         }
@@ -609,34 +526,10 @@ int main() {
         for (int j = 1; j < Ny - 1; ++j) {
             // Calculate y-component with central difference
             Ey[i][j] = -(V[i][j+1] - V[i][j-1]) * inv_2h;
-=======
-        if (max_diff_iter < tolerance) {
-            std::cout << "Converged after " << iteration + 1 << " iterations." << std::endl;
-            break;
-        }
-        if (iteration == max_iterations - 1) {
-             std::cout << "Max iterations (" << max_iterations << ") reached. Max diff: " << std::scientific << max_diff_iter << std::fixed << std::endl;
-        }
-    }
-
-    // --- Calculate Electric Field ---
-    std::vector<std::vector<double>> Ex(Nx, std::vector<double>(Ny, 0.0));
-    std::vector<std::vector<double>> Ey(Nx, std::vector<double>(Ny, 0.0));
-
-    for (int i = 1; i < Nx - 1; ++i) {
-        for (int j = 0; j < Ny; ++j) {
-            Ex[i][j] = -(V[i+1][j] - V[i-1][j]) / (2 * h);
-        }
-    }
-    for (int i = 0; i < Nx; ++i) {
-        for (int j = 1; j < Ny - 1; ++j) {
-            Ey[i][j] = -(V[i][j+1] - V[i][j-1]) / (2 * h);
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
         }
     }
 
     // Forward/backward difference for boundaries
-<<<<<<< HEAD
     #pragma omp parallel for
     for (int j = 0; j < Ny; ++j) {
         // Left boundary - forward difference
@@ -650,15 +543,6 @@ int main() {
     for (int i = 0; i < Nx; ++i) {
         Ey[i][0] = 0.0;
         Ey[i][Ny-1] = 0.0;
-=======
-    for (int j = 0; j < Ny; ++j) {
-        Ex[0][j] = -(V[1][j] - V[0][j]) / h;
-        Ex[Nx-1][j] = -(V[Nx-1][j] - V[Nx-2][j]) / h;
-    }
-    for (int i = 0; i < Nx; ++i) {
-        Ey[i][0] = -(V[i][1] - V[i][0]) / h;
-        Ey[i][Ny-1] = -(V[i][Ny-1] - V[i][Ny-2]) / h;
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
     }
 
     // --- Output Results to CSV ---
@@ -674,8 +558,4 @@ int main() {
     std::cout << "You can use external tools (e.g., Python with Matplotlib, Gnuplot, Excel) to plot these CSV files." << std::endl;
 
     return 0;
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> bde2ee9a4a537982a31d147f1700af70fe1c7806
