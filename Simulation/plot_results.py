@@ -86,11 +86,12 @@ def plot_results(folder_path=None): # Add folder_path argument
     if geo_params:
         # Try logic for toothed structures first
         y_si_base_h = geo_params.get("y_si_base_height")
-        y_teeth_h_val = geo_params.get("initial_y_teeth_height", geo_params.get("y_teeth_height")) # Try initial, then fallback
+        y_teeth_h_val = geo_params.get("initial_y_teeth_height") or geo_params.get("y_teeth_height") or geo_params.get("y_tooth_height") # Try initial, then plural, then singular
         y_vac_gap_thick_toothed = geo_params.get("y_vacuum_gap_thick")
+        pad_bottom = geo_params.get("y_vacuum_padding_bottom", 0.0)
 
         if y_si_base_h is not None and y_teeth_h_val is not None and y_vac_gap_thick_toothed is not None:
-            y_center_gap_abs = y_si_base_h + y_teeth_h_val + (y_vac_gap_thick_toothed / 2.0)
+            y_center_gap_abs = pad_bottom + y_si_base_h + y_teeth_h_val + (y_vac_gap_thick_toothed / 2.0)
             print(f"Using toothed geometry logic for profile plot y-center.")
         else:
             # Try piana_rastremata or piana_variabile geometry
@@ -101,25 +102,23 @@ def plot_results(folder_path=None): # Add folder_path argument
             y_si_thick_left = geo_params.get("y_si_layer_thick_left")
             y_vacuum_gap_thick_var = geo_params.get("y_vacuum_gap_thick")
             
-            # For piana_rastremata or piana_variabile: use average thickness at the center
+            # For piana_rastremata or piana_variabile: use thickness at the start (x=0)
             if y_si_thick_start is not None and y_si_thick_end is not None and y_vacuum_gap_thick_var is not None:
-                # For piana_rastremata: thickness varies linearly, use average
-                y_si_layer_avg = (y_si_thick_start + y_si_thick_end) / 2.0
-                y_center_gap_abs = y_si_layer_avg + (y_vacuum_gap_thick_var / 2.0)
-                print(f"Using 'piana_rastremata' logic for profile plot y-center (avg thickness).")
+                # For piana_rastremata: thickness varies linearly, use thickness at start (x=0)
+                y_center_gap_abs = pad_bottom + y_si_thick_start + (y_vacuum_gap_thick_var / 2.0)
+                print(f"Using 'piana_rastremata' logic for profile plot y-center (thickness at x=0: {y_si_thick_start:.2f} μm).")
             elif y_si_thick_right is not None and y_si_thick_left is not None and y_vacuum_gap_thick_var is not None:
-                # For piana_variabile: thickness varies linearly, use average
-                y_si_layer_avg = (y_si_thick_right + y_si_thick_left) / 2.0
-                y_center_gap_abs = y_si_layer_avg + (y_vacuum_gap_thick_var / 2.0)
-                print(f"Using 'piana_variabile' logic for profile plot y-center (avg thickness).")
+                # For piana_variabile: thickness varies linearly, use thickness at start (x=0, left side)
+                y_center_gap_abs = pad_bottom + y_si_thick_left + (y_vacuum_gap_thick_var / 2.0)
+                print(f"Using 'piana_variabile' logic for profile plot y-center (thickness at x=0: {y_si_thick_left:.2f} μm).")
             else:
                 # Fallback logic for simple "geometria_piana"
                 print("Rastremata/variabile geometry parameters not found. Trying simple 'geometria_piana' logic for profile plot y-center.")
-                y_si_layer_thick_piana = geo_params.get("y_si_layer_thick") 
+                y_si_layer_thick_piana = y_si_thick_start
                 y_vacuum_gap_thick_piana = geo_params.get("y_vacuum_gap_thick")
 
                 if y_si_layer_thick_piana is not None and y_vacuum_gap_thick_piana is not None:
-                    y_center_gap_abs = y_si_layer_thick_piana + (y_vacuum_gap_thick_piana / 2.0)
+                    y_center_gap_abs = pad_bottom + y_si_layer_thick_piana + (y_vacuum_gap_thick_piana / 2.0)
                     print(f"Using 'geometria_piana' logic for profile plot y-center.")
                 else:
                     print("Warning: Could not determine vacuum gap center from available geometry parameters. Profile plot will be skipped.")
@@ -167,20 +166,41 @@ def plot_results(folder_path=None): # Add folder_path argument
     # Note: x_coords, y_coords are 1D. eps_r, V, Ex, Ey are loaded as (Ny, Nx) due to .T
     X_mesh, Y_mesh = np.meshgrid(x_coords, y_coords)
     
-    # Define a threshold for distinguishing silicon from vacuum
+    # Define thresholds for distinguishing aluminum, silicon, and vacuum
     # Dynamically calculate based on loaded eps_r data
-    outline_threshold = None
+    outline_threshold_silicon = None
+    outline_threshold_aluminum = None
+    
     if eps_r is not None:
         unique_eps_values = np.unique(eps_r)
         unique_eps_values.sort() # Ensure sorted for min/max logic
-        if len(unique_eps_values) >= 2:
+        
+        if len(unique_eps_values) >= 3:
+            # We have vacuum (lowest), silicon (middle), aluminum (highest)
+            val_vacuum = unique_eps_values[0]
+            val_silicon = unique_eps_values[1]
+            val_aluminum = unique_eps_values[-1]
+            
+            # Threshold between vacuum and silicon
+            outline_threshold_silicon = (val_vacuum + val_silicon) / 2.0
+            # Threshold between silicon and aluminum
+            outline_threshold_aluminum = (val_silicon + val_aluminum) / 2.0
+            
+            print(f"Detected 3 materials:")
+            print(f"  Vacuum: ε_r = {val_vacuum:.2f}")
+            print(f"  Silicon: ε_r = {val_silicon:.2f}")
+            print(f"  Aluminum: ε_r = {val_aluminum:.2f}")
+            print(f"  Silicon outline threshold: {outline_threshold_silicon:.2f}")
+            print(f"  Aluminum outline threshold: {outline_threshold_aluminum:.2f}")
+            
+        elif len(unique_eps_values) >= 2:
             # Assume the two most extreme values (after sorting) represent vacuum and material
             val_low = unique_eps_values[0]
             val_high = unique_eps_values[-1]
             # Check if these values are reasonably distinct to represent two phases
             if val_high > val_low + 0.5: # Heuristic: difference must be at least 0.5
-                outline_threshold = (val_low + val_high) / 2.0
-                print(f"Dynamically calculated outline threshold: {outline_threshold:.2f} (from eps_r min/max: {val_low:.2f}, {val_high:.2f})")
+                outline_threshold_silicon = (val_low + val_high) / 2.0
+                print(f"Dynamically calculated outline threshold: {outline_threshold_silicon:.2f} (from eps_r min/max: {val_low:.2f}, {val_high:.2f})")
             else:
                 print(f"Warning: Unique permittivity values ({unique_eps_values}) are too close. Could not reliably determine outline threshold.")
         elif len(unique_eps_values) == 1:
@@ -204,34 +224,51 @@ def plot_results(folder_path=None): # Add folder_path argument
     ax_V.set_xlabel('x (μm)')
     ax_V.set_ylabel('y (μm)')
     ax_V.set_aspect('equal', adjustable='box')
-    draw_detailed_outlines(ax_V, X_mesh, Y_mesh, eps_r, outline_threshold, 'w--') # eps_r is (Ny, Nx)
+    draw_detailed_outlines(ax_V, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'w--') # Silicon outline
+    draw_detailed_outlines(ax_V, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-') # Aluminum outline
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "potential_plot.png"), dpi=300)
 
     # Plot 2: Electric Field Magnitude
     plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
     ax_Emag = plt.gca()
-    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag, levels=50, cmap='inferno') # E_mag is (Ny, Nx)
+    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag, levels=50, cmap='hot') # E_mag is (Ny, Nx)
     plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/μm)')
     ax_Emag.set_title('Electric Field Magnitude |E|')
     ax_Emag.set_xlabel('x (μm)')
     ax_Emag.set_ylabel('y (μm)')
     ax_Emag.set_aspect('equal', adjustable='box')
-    draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold, 'w--')
+    draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'w--')
+    draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "efield_magnitude_plot.png"), dpi=300)
 
     # Plot 3: Permittivity Map
     plt.figure(figsize=(8, 6)) # New figure for Permittivity
     ax_eps = plt.gca()
-    contour_eps = ax_eps.contourf(X_mesh, Y_mesh, eps_r, levels=np.linspace(np.min(eps_r), np.max(eps_r), 5), cmap='coolwarm') # eps_r is (Ny, Nx)
-    plt.colorbar(contour_eps, ax=ax_eps, label='Relative Permittivity (εᵣ)')
+    
+    # Check if permittivity has variation
+    eps_min = np.min(eps_r)
+    eps_max = np.max(eps_r)
+    
+    if eps_max > eps_min + 1e-6:  # Has variation
+        contour_eps = ax_eps.contourf(X_mesh, Y_mesh, eps_r, levels=np.linspace(eps_min, eps_max, 5), cmap='RdBu')
+        plt.colorbar(contour_eps, ax=ax_eps, label='Relative Permittivity (εᵣ)')
+    else:  # Constant value - use imshow instead
+        im_eps = ax_eps.imshow(eps_r, extent=[X_mesh.min(), X_mesh.max(), Y_mesh.min(), Y_mesh.max()], 
+                               origin='lower', cmap='RdBu', aspect='auto')
+        plt.colorbar(im_eps, ax=ax_eps, label='Relative Permittivity (εᵣ)')
+        ax_eps.text(0.5, 0.95, f'Uniform εᵣ = {eps_min:.2f}', 
+                   transform=ax_eps.transAxes, ha='center', va='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
     ax_eps.set_title('Relative Permittivity Map')
     ax_eps.set_xlabel('x (μm)')
     ax_eps.set_ylabel('y (μm)')
     ax_eps.set_aspect('equal', adjustable='box')
     # Optionally, draw outlines on the permittivity map itself, perhaps with a different color
-    draw_detailed_outlines(ax_eps, X_mesh, Y_mesh, eps_r, outline_threshold, 'k--') 
+    draw_detailed_outlines(ax_eps, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'k--')
+    draw_detailed_outlines(ax_eps, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "permittivity_map_plot.png"), dpi=300)
 
@@ -261,11 +298,11 @@ def plot_results(folder_path=None): # Add folder_path argument
     Emag_quiver = E_mag.copy()
 
     # Create a mask for points outside the vacuum gap using the permittivity map
-    # Vacuum is where eps_r is close to eps_vac_assumed (e.g., < outline_threshold)
+    # Vacuum is where eps_r is close to eps_vac_assumed (e.g., < outline_threshold_silicon)
     # Mask should be True for non-vacuum regions.
     # eps_r is already (Ny, Nx)
-    if outline_threshold is not None:
-        mask_not_vacuum = (eps_r >= outline_threshold) 
+    if outline_threshold_silicon is not None:
+        mask_not_vacuum = (eps_r >= outline_threshold_silicon) 
     else: # If no threshold, assume all is vacuum for quiver (or handle differently)
         mask_not_vacuum = np.zeros_like(eps_r, dtype=bool) # No mask, plot everywhere
         print("Warning: Quiver plot mask could not be determined due to missing outline_threshold. Plotting vectors everywhere.")
@@ -289,7 +326,8 @@ def plot_results(folder_path=None): # Add folder_path argument
     ax_Evec.set_ylabel('y (μm)')
     ax_Evec.set_aspect('equal', adjustable='box')
     # Add structure outlines
-    draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold, 'k--')
+    draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'k--')
+    draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "efield_quiver_vacuum_plot.png"), dpi=300) # Renamed save file
 

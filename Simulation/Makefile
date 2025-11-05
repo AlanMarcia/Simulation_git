@@ -14,6 +14,13 @@ PYTHON = python3
 # Geometry types
 GEOMETRIES = piana piana_rastremata piana_variabile denti_sfasati_profondi denti_uguali
 
+# Optional parameters for proton simulator
+# Usage: make run-piana-rastremata Y_MIN=35 Y_MAX=55
+# Or set as environment variables before running make
+Y_MIN ?=
+Y_MAX ?=
+RNG_SEED ?=
+
 # Default target
 all: $(TARGET_POISSON) $(TARGET_PROTON)
 
@@ -55,7 +62,17 @@ run-piana-rastremata: $(TARGET_POISSON) $(TARGET_PROTON)
 	@echo "=== Running Piana Rastremata Geometry ==="
 	mkdir -p geometria_piana_rastremata
 	./$(TARGET_POISSON) geometria_piana_rastremata piana_rastremata
-	./$(TARGET_PROTON) geometria_piana_rastremata
+	@if [ -n "$(Y_MIN)" ] && [ -n "$(Y_MAX)" ]; then \
+		echo "Using Y_MIN=$(Y_MIN) Y_MAX=$(Y_MAX)"; \
+		if [ -n "$(RNG_SEED)" ]; then \
+			./$(TARGET_PROTON) geometria_piana_rastremata $(Y_MIN) $(Y_MAX) $(RNG_SEED); \
+		else \
+			./$(TARGET_PROTON) geometria_piana_rastremata $(Y_MIN) $(Y_MAX); \
+		fi \
+	else \
+		echo "Using automatic y-range detection"; \
+		./$(TARGET_PROTON) geometria_piana_rastremata; \
+	fi
 	$(PYTHON) plot_results.py geometria_piana_rastremata/
 	$(PYTHON) plot_trajectories.py geometria_piana_rastremata/
 	@echo "=== Piana Rastremata Geometry Complete ==="
@@ -146,6 +163,15 @@ help:
 	@echo "  run-piana-variabile   - Run complete pipeline for piana variabile geometry"
 	@echo "  run-denti-sfasati     - Run complete pipeline for denti sfasati profondi geometry"
 	@echo "  run-denti-uguali      - Run complete pipeline for denti uguali geometry"
+	@echo ""
+	@echo "=== PROTON SIMULATOR PARAMETERS ==="
+	@echo "  Y_MIN=<value>         - Set minimum y position in micrometers (um)"
+	@echo "  Y_MAX=<value>         - Set maximum y position in micrometers (um)"
+	@echo "  RNG_SEED=<value>      - Set random seed (optional)"
+	@echo ""
+	@echo "  Example: make run-piana-rastremata Y_MIN=35 Y_MAX=55"
+	@echo "  Example: make run-piana-rastremata Y_MIN=35 Y_MAX=55 RNG_SEED=12345"
+	@echo "  Without Y_MIN/Y_MAX: automatic detection from permittivity map"
 	@echo ""
 	@echo "=== BATCH OPERATIONS ==="
 	@echo "  run-all-geometries    - Run ALL geometries (Poisson + Proton + Plots)"

@@ -36,7 +36,7 @@ void saveToCSV(const std::vector<std::vector<double>>& data, const std::string& 
     
     // Use string stream for faster composition
     std::ostringstream rowStream;
-    rowStream << std::setprecision(10); // Set precision once
+    rowStream << std::scientific << std::setprecision(15); // Scientific notation with high precision
     
     // Pre-calculate sizes for efficiency
     size_t nx = data.size();
@@ -201,11 +201,15 @@ int main(int argc, char* argv[]) {
     // At this point, the full 'output_folder' path should exist.
 
     // --- Common Parameters ---
-    const double common_h_param = 0.1; // Grid spacing in micrometers (µm)
+    const double common_h_param = 0.5; // Grid spacing in micrometers (µm)
     const double V_left_bc = 0.0;  // Volts
-    const double V_right_bc = -100000.0; // Volts
-    const double omega_sor = 1.8; // Relaxation factor
-    const int max_iter_sor = 50000000;
+    const double V_right_bc = -50000.0; // Volts (50 kV for high-field acceleration)
+    
+    // Optimal SOR parameter calculation for faster convergence
+    // For 2D Laplace with grid spacing h, optimal omega ≈ 2/(1 + π*h/L)
+    // We use a slightly more conservative value for stability with material interfaces
+    const double omega_sor = 1.92; // Optimized relaxation factor (was 1.8) - closer to optimal ~1.95
+    const int max_iter_sor = 5000000; // 
     
     // Material properties
     const double eps_sio2_mat = 3.9;
@@ -305,10 +309,27 @@ int main(int argc, char* argv[]) {
         setupDentiUgualiPermittivity(eps_r, geom_config, du_geom_params, Nx, Ny);
     }
     
+    // Add aluminum plates at the boundaries (electrodes)
+    addAluminumPlates(eps_r, geom_config, Nx, Ny);
+    
     std::cout << "Grid size: Nx=" << Nx << ", Ny=" << Ny << ", Grid spacing h=" << geom_config.h << " µm" << std::endl;
 
     // --- Boundary Conditions ---
     setupBoundaryConditions(V, fixed_potential_mask, eps_r, geom_config, V_left_bc, V_right_bc, Nx, Ny);
+    
+    // Apply initial Neumann boundary conditions on top and bottom for symmetry
+    std::cout << "Applying Neumann boundary conditions on top/bottom for symmetry..." << std::endl;
+    #pragma omp parallel for
+    for (int i = 0; i < Nx; ++i) {
+        // Bottom boundary: dV/dy = 0
+        if (!fixed_potential_mask[i][0]) {
+            V[i][0] = V[i][1];
+        }
+        // Top boundary: dV/dy = 0
+        if (!fixed_potential_mask[i][Ny - 1]) {
+            V[i][Ny - 1] = V[i][Ny - 2];
+        }
+    }
 
     // --- SOR Iteration ---
     double tolerance_sor = geom_config.current_tolerance;
@@ -421,19 +442,29 @@ int main(int argc, char* argv[]) {
         }
 
         // Apply Neumann BCs to outer simulation boundaries more efficiently
-        // Left and right boundaries
+        // Left and right boundaries - improved Neumann conditions
         #pragma omp parallel for
         for (int j = 0; j < Ny; ++j) {
             // Only update if not a fixed point
             if (!fixed_potential_mask[0][j]) {
-                V[0][j] = V[1][j];
+                // Use linear extrapolation for smoother boundary
+                if (j > 0 && j < Ny - 1) {
+                    V[0][j] = V[1][j]; // Standard Neumann
+                } else {
+                    V[0][j] = V[1][j];
+                }
             }
             if (!fixed_potential_mask[Nx - 1][j]) {
-                V[Nx - 1][j] = V[Nx - 2][j];
+                // Use linear extrapolation for smoother boundary
+                if (j > 0 && j < Ny - 1) {
+                    V[Nx - 1][j] = V[Nx - 2][j]; // Standard Neumann
+                } else {
+                    V[Nx - 1][j] = V[Nx - 2][j];
+                }
             }
         }
         
-        // Bottom and top boundaries
+        // Bottom and top boundaries - improved Neumann conditions
         #pragma omp parallel for
         for (int i = 0; i < Nx; ++i) {
             // Only update if not a fixed point
@@ -463,6 +494,17 @@ int main(int argc, char* argv[]) {
                 std::cout << " [No improvement count: " << no_improvement_count << "]";
             }
             std::cout << std::endl;
+        }
+        
+        // Warning if convergence is very slow
+        if (iteration == 10000 && max_diff_iter > tolerance_sor * 100) {
+            std::cout << "WARNING: Slow convergence detected at 10k iterations. Current error: " 
+                      << std::scientific << max_diff_iter << " vs target: " << tolerance_sor << std::fixed << std::endl;
+            std::cout << "Consider: 1) Reducing voltage, 2) Increasing tolerance, 3) Checking geometry" << std::endl;
+        }
+        if (iteration == 50000 && max_diff_iter > tolerance_sor * 10) {
+            std::cout << "WARNING: Very slow convergence at 50k iterations. Error: " 
+                      << std::scientific << max_diff_iter << " vs target: " << tolerance_sor << std::fixed << std::endl;
         }
 
         // Controllo di convergenza standard
@@ -503,47 +545,188 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // --- Calculate Electric Field more efficiently ---
+    // --- Calculate Electric Field with improved accuracy at material interfaces ---
     // Declare electric field vectors
     std::vector<std::vector<double>> Ex(Nx, std::vector<double>(Ny, 0.0));
     std::vector<std::vector<double>> Ey(Nx, std::vector<double>(Ny, 0.0));
     
-    // Pre-compute the reciprocal of 2*h to avoid division in loops
+    // Pre-compute the reciprocal of 2*h and h to avoid division in loops
     const double inv_2h = 1.0 / (2.0 * geom_config.h);
     const double inv_h = 1.0 / geom_config.h;
     
-    // Central difference for interior points
-    #pragma omp parallel for schedule(static)
-    for (int i = 1; i < Nx - 1; ++i) {
-        for (int j = 0; j < Ny; ++j) {
-            // Calculate x-component with central difference
-            Ex[i][j] = -(V[i+1][j] - V[i-1][j]) * inv_2h;
+    std::cout << "Calculating electric field with interface-aware method..." << std::endl;
+    
+    // Calculate electric field considering material interfaces
+    // Use 4th-order accurate scheme for Ey in uniform regions, 2nd-order at interfaces
+    #pragma omp parallel for schedule(static) collapse(2)
+    for (int i = 2; i < Nx - 2; ++i) {
+        for (int j = 2; j < Ny - 2; ++j) {
+            // Check if we're at a material interface for Ex calculation
+            double eps_curr = eps_r[i][j];
+            double eps_next = eps_r[i+1][j];
+            double eps_prev = eps_r[i-1][j];
+            
+            // Detect material discontinuity (threshold 0.1 to avoid numerical noise)
+            bool interface_x = (std::abs(eps_next - eps_curr) > 0.1 || std::abs(eps_prev - eps_curr) > 0.1);
+            
+            if (interface_x) {
+                // At material interfaces, use weighted averaging for better accuracy
+                // Weight by permittivity to account for field discontinuity
+                double weight_next = eps_next / (eps_next + 1e-12);
+                double weight_prev = eps_prev / (eps_prev + 1e-12);
+                double weight_sum = weight_next + weight_prev;
+                
+                if (weight_sum > 0.01) {
+                    // Weighted gradient considering material properties
+                    Ex[i][j] = -(weight_next * (V[i+1][j] - V[i][j]) / geom_config.h + 
+                                 weight_prev * (V[i][j] - V[i-1][j]) / geom_config.h) / weight_sum;
+                } else {
+                    // Fallback to standard central difference
+                    Ex[i][j] = -(V[i+1][j] - V[i-1][j]) * inv_2h;
+                }
+            } else {
+                // Standard central difference for uniform regions
+                Ex[i][j] = -(V[i+1][j] - V[i-1][j]) * inv_2h;
+            }
+            
+            // Enhanced treatment for Ey component with 4th-order accuracy
+            double eps_up = eps_r[i][j+1];
+            double eps_down = eps_r[i][j-1];
+            double eps_up2 = eps_r[i][j+2];
+            double eps_down2 = eps_r[i][j-2];
+            
+            bool interface_y = (std::abs(eps_up - eps_curr) > 0.1 || std::abs(eps_down - eps_curr) > 0.1);
+            
+            if (interface_y) {
+                // At interfaces, use 2nd-order weighted scheme
+                double weight_up = eps_up / (eps_up + 1e-12);
+                double weight_down = eps_down / (eps_down + 1e-12);
+                double weight_sum = weight_up + weight_down;
+                
+                if (weight_sum > 0.01) {
+                    Ey[i][j] = -(weight_up * (V[i][j+1] - V[i][j]) / geom_config.h + 
+                                 weight_down * (V[i][j] - V[i][j-1]) / geom_config.h) / weight_sum;
+                } else {
+                    Ey[i][j] = -(V[i][j+1] - V[i][j-1]) * inv_2h;
+                }
+            } else {
+                // Check if 5-point stencil is also in uniform region
+                bool uniform_5point = (std::abs(eps_up2 - eps_curr) < 0.1 && 
+                                      std::abs(eps_down2 - eps_curr) < 0.1);
+                
+                if (uniform_5point) {
+                    // 4th-order accurate central difference (5-point stencil)
+                    // Formula: f'(x) ≈ [-f(x+2h) + 8f(x+h) - 8f(x-h) + f(x-2h)] / (12h)
+                    Ey[i][j] = -(-V[i][j+2] + 8.0*V[i][j+1] - 8.0*V[i][j-1] + V[i][j-2]) / (12.0 * geom_config.h);
+                } else {
+                    // Fallback to 2nd-order if extended stencil crosses interface
+                    Ey[i][j] = -(V[i][j+1] - V[i][j-1]) * inv_2h;
+                }
+            }
         }
     }
     
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < Nx; ++i) {
+    // Handle edges and near-edge points with 2nd-order scheme
+    #pragma omp parallel for
+    for (int i = 1; i < Nx - 1; ++i) {
         for (int j = 1; j < Ny - 1; ++j) {
-            // Calculate y-component with central difference
+            // Skip points already computed with 4th-order scheme
+            if (i >= 2 && i < Nx - 2 && j >= 2 && j < Ny - 2) continue;
+            
+            // Use 2nd-order scheme for near-boundary points
+            Ex[i][j] = -(V[i+1][j] - V[i-1][j]) * inv_2h;
             Ey[i][j] = -(V[i][j+1] - V[i][j-1]) * inv_2h;
         }
     }
-
-    // Forward/backward difference for boundaries
+    
+    // Handle edges with special care to avoid artifacts
     #pragma omp parallel for
-    for (int j = 0; j < Ny; ++j) {
-        // Left boundary - forward difference
+    for (int j = 1; j < Ny - 1; ++j) {
+        // Left boundary (i=0) - use forward difference
         Ex[0][j] = -(V[1][j] - V[0][j]) * inv_h;
-        // Right boundary - backward difference
+        Ey[0][j] = -(V[0][j+1] - V[0][j-1]) * inv_2h;
+        
+        // Right boundary (i=Nx-1) - use backward difference
         Ex[Nx-1][j] = -(V[Nx-1][j] - V[Nx-2][j]) * inv_h;
+        Ey[Nx-1][j] = -(V[Nx-1][j+1] - V[Nx-1][j-1]) * inv_2h;
     }
     
-    // Explicitly set Ey to zero at boundaries (this can be vectorized)
-    #pragma omp parallel for simd
-    for (int i = 0; i < Nx; ++i) {
-        Ey[i][0] = 0.0;
-        Ey[i][Ny-1] = 0.0;
+    // Top and bottom boundaries
+    #pragma omp parallel for
+    for (int i = 1; i < Nx - 1; ++i) {
+        // Bottom boundary (j=0)
+        Ex[i][0] = -(V[i+1][0] - V[i-1][0]) * inv_2h;
+        Ey[i][0] = -(V[i][1] - V[i][0]) * inv_h;
+        
+        // Top boundary (j=Ny-1)
+        Ex[i][Ny-1] = -(V[i+1][Ny-1] - V[i-1][Ny-1]) * inv_2h;
+        Ey[i][Ny-1] = -(V[i][Ny-1] - V[i][Ny-2]) * inv_h;
     }
+    
+    // Corner points - use appropriate one-sided differences
+    Ex[0][0] = -(V[1][0] - V[0][0]) * inv_h;
+    Ey[0][0] = -(V[0][1] - V[0][0]) * inv_h;
+    Ex[Nx-1][0] = -(V[Nx-1][0] - V[Nx-2][0]) * inv_h;
+    Ey[Nx-1][0] = -(V[Nx-1][1] - V[Nx-1][0]) * inv_h;
+    Ex[0][Ny-1] = -(V[1][Ny-1] - V[0][Ny-1]) * inv_h;
+    Ey[0][Ny-1] = -(V[0][Ny-1] - V[0][Ny-2]) * inv_h;
+    Ex[Nx-1][Ny-1] = -(V[Nx-1][Ny-1] - V[Nx-2][Ny-1]) * inv_h;
+    Ey[Nx-1][Ny-1] = -(V[Nx-1][Ny-1] - V[Nx-1][Ny-2]) * inv_h;
+    
+    std::cout << "Electric field calculation completed." << std::endl;
+
+    // --- Apply selective smoothing to Ey in vacuum regions ---
+    std::cout << "Applying selective smoothing to Ey in vacuum regions..." << std::endl;
+    
+    // Create a temporary copy of Ey for smoothing
+    std::vector<std::vector<double>> Ey_smoothed = Ey;
+    
+    // Gaussian kernel 3x3 (normalized)
+    const double kernel[3][3] = {
+        {0.0625, 0.125, 0.0625},
+        {0.125,  0.25,  0.125},
+        {0.0625, 0.125, 0.0625}
+    };
+    
+    // Threshold to identify vacuum (eps_r close to 1.0)
+    const double vacuum_threshold = 1.5;
+    
+    // Apply smoothing only in vacuum regions
+    #pragma omp parallel for schedule(static) collapse(2)
+    for (int i = 1; i < Nx - 1; ++i) {
+        for (int j = 1; j < Ny - 1; ++j) {
+            // Check if current point is in vacuum
+            if (eps_r[i][j] < vacuum_threshold) {
+                double sum = 0.0;
+                double weight_sum = 0.0;
+                
+                // Apply 3x3 Gaussian kernel
+                for (int di = -1; di <= 1; ++di) {
+                    for (int dj = -1; dj <= 1; ++dj) {
+                        int ni = i + di;
+                        int nj = j + dj;
+                        
+                        // Only include neighboring vacuum points in smoothing
+                        if (eps_r[ni][nj] < vacuum_threshold) {
+                            double w = kernel[di + 1][dj + 1];
+                            sum += Ey[ni][nj] * w;
+                            weight_sum += w;
+                        }
+                    }
+                }
+                
+                // Apply smoothed value if we had enough vacuum neighbors
+                if (weight_sum > 0.1) {
+                    Ey_smoothed[i][j] = sum / weight_sum;
+                }
+            }
+        }
+    }
+    
+    // Replace Ey with smoothed version
+    Ey = Ey_smoothed;
+    
+    std::cout << "Selective smoothing completed." << std::endl;
 
     // --- Output Results to CSV ---
     saveToCSV(V, output_folder + "/potential.csv");

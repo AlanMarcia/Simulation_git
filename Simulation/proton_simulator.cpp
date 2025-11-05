@@ -8,6 +8,7 @@
 #include <algorithm> // For std::min, std::max
 #include <sstream>   // For std::stringstream
 #include <omp.h>     // For OpenMP
+#include "geometry_definitions.h" // For addAluminumPlates
 
 // Branch prediction hint macros
 #if defined(__GNUC__) || defined(__clang__)
@@ -38,13 +39,15 @@ const double M_PROTON = 1.67262192e-27; // kg (SI)
 const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
-const int NUM_PROTONS = 100000;
-const double TIME_STEP_S = 1e-12;       // Time step in seconds (SI)
+const int NUM_PROTONS = 50000;
+const double TIME_STEP_S = 1e-13;       // Time step in seconds (SI)
 const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
 const double OUTPUT_TIME_INTERVAL_S = 1e-11; // Interval for writing trajectory data (SI)
 // Initial X position will be set in main after loading geometry, in meters
 
 const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 1.1; // If eps_r > this, it's material (vacuum is ~1.0)
+
+inline int find_cell_index(const std::vector<double>& coords, double pos);
 
 // --- Structures ---
 struct Proton {
@@ -258,81 +261,47 @@ std::pair<double, double> find_vacuum_channel_from_map(
         return {0.0, 0.0};
     }
 
-    double x_coord_spacing = (x_coords_m.size() > 1) ? (x_coords_m[1] - x_coords_m[0]) : 1.0;
-    if (x_coord_spacing <= 0) x_coord_spacing = 1.0; // Avoid division by zero    // More efficient index calculation with direct clamping
-    const double inv_x_coord_spacing = (x_coord_spacing > 1e-9) ? (1.0 / x_coord_spacing) : 1.0;
+    // Find the exact index at the search position (should be a single column)
+    // Use the middle of the search range to get the exact position
+    double x_target_m = (x_search_start_m + x_search_end_m) / 2.0;
+    int idx_x_target = find_cell_index(x_coords_m, x_target_m);
     
-    int idx_x_start_search = static_cast<int>(x_search_start_m * inv_x_coord_spacing);
-    int idx_x_end_search = static_cast<int>(x_search_end_m * inv_x_coord_spacing);
+    // Clamp index to be within bounds
+    idx_x_target = std::max(0, std::min(idx_x_target, Nx_map - 1));
     
-    // Clamp indices in one step for better efficiency
-    idx_x_start_search = std::max(0, std::min(idx_x_start_search, Nx_map - 1));
-    idx_x_end_search = std::max(0, std::min(idx_x_end_search, Nx_map - 1));
-    // More compact handling of invalid ranges
-    if (idx_x_start_search > idx_x_end_search) { 
-        std::cout << "Warning: Invalid x-search range for vacuum. Analyzing central 50% of x-domain." << std::endl;
-        // Calculate middle 50% of domain for better scanning
-        const int middle = Nx_map / 2;
-        const int quarter = Nx_map / 4;
-        idx_x_start_search = std::max(0, middle - quarter);
-        idx_x_end_search = std::min(Nx_map - 1, middle + quarter);
-    }
-    // Initialize with opposite extremes for min/max comparison
-    double overall_vac_min_y = y_coords_m.back(); 
-    double overall_vac_max_y = y_coords_m.front();
-    bool found_any_gap_in_any_column = false;
-
-    // Vectorization opportunity with OpenMP
-    #pragma omp parallel for reduction(max:overall_vac_min_y) reduction(min:overall_vac_max_y) reduction(||:found_any_gap_in_any_column)
-    for (int i = idx_x_start_search; i <= idx_x_end_search; ++i) {
-        // Scan from bottom to find where material ends
-        int j_bottom_material_top_idx = -1;
-        
-        // This loop has good spatial locality and can benefit from vectorization
-        for (int j = 0; j < Ny_map; ++j) {
-            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
-                j_bottom_material_top_idx = j;
-            } else {
-                break; // Found first vacuum cell
-            }
-        }        // Scan from top to find where material starts
-        int j_top_material_bottom_idx = -1;
-        
-        // This loop also has good spatial locality
-        for (int j = Ny_map - 1; j >= 0; --j) {
-            if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
-                j_top_material_bottom_idx = j;
-            } else {
-                break; // Found first vacuum cell from top
-            }
-        }
-        
-        // Calculate vacuum boundaries for this column        // More efficient calculation with direct conditional assignment
-        double col_vac_start_y = (j_bottom_material_top_idx == -1) ? 
-                                  y_coords_m.front() : 
-                                  y_coords_m[j_bottom_material_top_idx] + h_grid_m_from_coords;
-                                  
-        double col_vac_end_y = (j_top_material_bottom_idx == -1) ? 
-                               y_coords_m.back() : 
-                               y_coords_m[j_top_material_bottom_idx];
-        
-        // Ensure bounds are respected
-        col_vac_start_y = std::max(col_vac_start_y, y_coords_m.front());
-        col_vac_end_y = std::min(col_vac_end_y, y_coords_m.back());
-
-
-        if (col_vac_start_y < col_vac_end_y) { // Valid gap in this column
-            if (!found_any_gap_in_any_column) {
-                overall_vac_min_y = col_vac_start_y;
-                overall_vac_max_y = col_vac_end_y;
-                found_any_gap_in_any_column = true;
-            } else {
-                // Intersection: take the highest min_y and lowest max_y
-                overall_vac_min_y = std::max(overall_vac_min_y, col_vac_start_y);
-                overall_vac_max_y = std::min(overall_vac_max_y, col_vac_end_y);
-            }
+    // Calculate gap at THIS specific x position only, no intersection with other columns
+    int i = idx_x_target;
+    
+    // Scan from bottom to find the LAST (topmost) material cell
+    int j_bottom_material_top_idx = -1;
+    for (int j = 0; j < Ny_map; ++j) {
+        if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
+            j_bottom_material_top_idx = j; // Keep updating, we want the last one
         }
     }
+    
+    // Scan from top to find the FIRST (bottommost) material cell from the top
+    int j_top_material_bottom_idx = -1;
+    for (int j = Ny_map - 1; j >= 0; --j) {
+        if (eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD) {
+            j_top_material_bottom_idx = j; // Keep updating, we want the first one from top
+        }
+    }
+    
+    // Calculate vacuum boundaries at this specific x position
+    double overall_vac_min_y = (j_bottom_material_top_idx == -1) ? 
+                              y_coords_m.front() : 
+                              y_coords_m[j_bottom_material_top_idx] + h_grid_m_from_coords;
+                              
+    double overall_vac_max_y = (j_top_material_bottom_idx == -1) ? 
+                           y_coords_m.back() : 
+                           y_coords_m[j_top_material_bottom_idx];
+    
+    // Ensure bounds are respected
+    overall_vac_min_y = std::max(overall_vac_min_y, y_coords_m.front());
+    overall_vac_max_y = std::min(overall_vac_max_y, y_coords_m.back());
+    
+    bool found_any_gap_in_any_column = (overall_vac_min_y < overall_vac_max_y);
 
     if (!found_any_gap_in_any_column || overall_vac_min_y >= overall_vac_max_y) {
         // Fallback if no consistent channel found
@@ -377,29 +346,26 @@ std::pair<double, double> find_vacuum_channel_from_map(
 }
 
 std::pair<double, double> get_field_at_point(
-    double px, double py, // px, py in meters
-    const std::vector<double>& x_coords, const std::vector<double>& y_coords, // x_coords, y_coords in meters
-    const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field, // Fields in V/m
-    double h_grid, int Nx, int Ny) { // h_grid in meters
+    double px, double py,
+    const std::vector<double>& x_coords, const std::vector<double>& y_coords,
+    const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field,
+    int Nx, int Ny) {
 
     // Quick bounds check - avoids unnecessary calculations
     if (px < x_coords.front() || px > x_coords.back() || py < y_coords.front() || py > y_coords.back()) {
         return {0.0, 0.0}; // Outside grid
     }
 
-    // Fast index calculation
-    const double px_normalized = px / h_grid;
-    const double py_normalized = py / h_grid;
-    const int i_idx = static_cast<int>(std::floor(px_normalized));
-    const int j_idx = static_cast<int>(std::floor(py_normalized));
+    const int i = std::max(0, std::min(find_cell_index(x_coords, px), Nx - 2));
+    const int j = std::max(0, std::min(find_cell_index(y_coords, py), Ny - 2));
 
-    // Clamp indices to be within valid range for interpolation
-    const int i = std::max(0, std::min(i_idx, Nx - 2));
-    const int j = std::max(0, std::min(j_idx, Ny - 2));
+    const double x0 = x_coords[i];
+    const double x1 = x_coords[i + 1];
+    const double y0 = y_coords[j];
+    const double y1 = y_coords[j + 1];
 
-    // Calculate fractional components for interpolation once
-    const double tx = px_normalized - i;
-    const double ty = py_normalized - j;
+    const double tx = (x1 - x0) > 0.0 ? (px - x0) / (x1 - x0) : 0.0;
+    const double ty = (y1 - y0) > 0.0 ? (py - y0) / (y1 - y0) : 0.0;
     const double tx_comp = 1.0 - tx;
     const double ty_comp = 1.0 - ty;
 
@@ -431,48 +397,45 @@ std::pair<double, double> get_field_at_point(
 
 // Optimized acceleration calculation with inlining hint
 inline std::pair<double, double> get_acceleration(
-    double px, double py, // px, py in meters
-    const std::vector<double>& x_coords, const std::vector<double>& y_coords, // x_coords, y_coords in meters
-    const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field, // Fields in V/m
-    double h_grid, int Nx, int Ny) { // h_grid in meters
-    
-    std::pair<double, double> E_vec = get_field_at_point(px, py, x_coords, y_coords, Ex_field, Ey_field, h_grid, Nx, Ny);
+    double px, double py,
+    const std::vector<double>& x_coords, const std::vector<double>& y_coords,
+    const std::vector<std::vector<double>>& Ex_field, const std::vector<std::vector<double>>& Ey_field,
+    int Nx, int Ny) {
+
+    std::pair<double, double> E_vec = get_field_at_point(px, py, x_coords, y_coords, Ex_field, Ey_field, Nx, Ny);
     
     // Using the constant directly for multiplication saves a memory lookup
     return {K_ACCEL * E_vec.first, K_ACCEL * E_vec.second}; // (ax, ay) in m/s^2
 }
 
 // Optimized with inline hint for better compiler optimization
+inline int find_cell_index(const std::vector<double>& coords, double pos) {
+    if (pos <= coords.front()) return 0;
+    if (pos >= coords.back()) return static_cast<int>(coords.size()) - 2;
+    auto upper = std::upper_bound(coords.begin(), coords.end(), pos);
+    int idx = static_cast<int>(std::distance(coords.begin(), upper)) - 1;
+    return std::max(0, idx);
+}
+
 inline bool is_in_material_or_out_of_bounds(
-    double px, double py, // px, py in meters
-    const std::vector<double>& x_coords_m, // in meters
-    const std::vector<double>& y_coords_m, // in meters
+    double px, double py,
+    const std::vector<double>& x_coords_m,
+    const std::vector<double>& y_coords_m,
     const std::vector<std::vector<double>>& eps_r_map,
-    double h_grid_m, // grid spacing in meters
     double L_total_sim_m, double H_total_sim_m) {
-    
-    // Fast bounds check - more efficient branching
+
     if (px <= 0.0 || px >= L_total_sim_m || py <= 0.0 || py >= H_total_sim_m) {
-        return true; // Out of simulation box
+        return true;
     }
 
-    // Fast integer division using reciprocal multiplication
-    const double inv_h_grid_m = 1.0 / h_grid_m;
-    const int i_idx = static_cast<int>(px * inv_h_grid_m);
-    const int j_idx = static_cast<int>(py * inv_h_grid_m);
+    const int Nx_map = static_cast<int>(eps_r_map.size());
+    if (UNLIKELY(Nx_map == 0)) return true;
+    const int Ny_map = static_cast<int>(eps_r_map[0].size());
+    if (UNLIKELY(Ny_map == 0)) return true;
 
-    // Get map dimensions once to avoid multiple lookups
-    const int Nx_map = eps_r_map.size();
-    if (UNLIKELY(Nx_map == 0)) return true;  // UNLIKELY macro hint for branch prediction
-    
-    const int Ny_map = eps_r_map[0].size();
-    if (UNLIKELY(Ny_map == 0)) return true;  // UNLIKELY macro hint for branch prediction
+    const int i = std::max(0, std::min(find_cell_index(x_coords_m, px), Nx_map - 1));
+    const int j = std::max(0, std::min(find_cell_index(y_coords_m, py), Ny_map - 1));
 
-    // Index clamping with branchless min/max
-    const int i = std::max(0, std::min(i_idx, Nx_map - 1));
-    const int j = std::max(0, std::min(j_idx, Ny_map - 1));
-
-    // Direct comparison instead of branching
     return eps_r_map[i][j] >= REL_PERMITTIVITY_MATERIAL_THRESHOLD;
 }
 
@@ -480,12 +443,38 @@ inline bool is_in_material_or_out_of_bounds(
 int main(int argc, char* argv[]) { // Modified main signature
     
     std::string input_base_folder_name = "geometria_Denti_sfasati_profondi_5um_default"; // Default input folder
+    double user_y_min_um = -1.0; // -1 means not specified, will use automatic detection
+    double user_y_max_um = -1.0; // -1 means not specified, will use automatic detection
+    
     if (argc > 1) {
         input_base_folder_name = argv[1]; // Use the first command-line argument as folder name
         std::cout << "Input data folder specified: " << input_base_folder_name << std::endl;
     } else {
         std::cout << "No input data folder specified, using default: " << input_base_folder_name << std::endl;
     }
+    
+    // Parse optional y_min and y_max parameters (in micrometers)
+    // Usage: ./proton_simulator <folder> [y_min_um] [y_max_um]
+    if (argc > 2) {
+        try {
+            user_y_min_um = std::stod(argv[2]);
+            std::cout << "User-specified y_min: " << user_y_min_um << " um" << std::endl;
+        } catch (...) {
+            std::cerr << "Warning: Invalid y_min argument, will use automatic detection." << std::endl;
+            user_y_min_um = -1.0;
+        }
+    }
+    
+    if (argc > 3) {
+        try {
+            user_y_max_um = std::stod(argv[3]);
+            std::cout << "User-specified y_max: " << user_y_max_um << " um" << std::endl;
+        } catch (...) {
+            std::cerr << "Warning: Invalid y_max argument, will use automatic detection." << std::endl;
+            user_y_max_um = -1.0;
+        }
+    }
+    
     const std::string folder = input_base_folder_name; // Use 'folder' as it was used before, now initialized from CLI or default
 
     // The line below was: const std::string input_base_folder = folder; 
@@ -572,10 +561,8 @@ int main(int argc, char* argv[]) { // Modified main signature
      }
 
 
-    double initial_x_position_m=5e-6;
+    double initial_x_position_m = 20e-6;
     
-
-
     std::vector<std::vector<double>> Ex_field, Ey_field; 
     std::vector<std::vector<double>> eps_r_map_data;     
 
@@ -587,49 +574,82 @@ int main(int argc, char* argv[]) { // Modified main signature
     }
     std::cout << "Data loaded successfully. Nx=" << Nx << ", Ny=" << Ny << std::endl;
     
-    // Determine the x-range to search for the vacuum channel based on geometry parameters
-    // This range should ideally cover the main structural part to find the "inner gap".
-    double x_search_start_for_gap = geom.x_fs;
-    double x_search_end_for_gap = geom.x_fs + geom.x_sl;
-
-    if (geom.x_fs <= 1e-9 || geom.x_sl <= 1e-9 || x_search_start_for_gap < 0 || x_search_end_for_gap <= x_search_start_for_gap || x_search_end_for_gap > L_total_sim ) { 
-        std::cout << "Warning: x_fs or x_sl from CSV is zero, not loaded, or defines an invalid/out-of-bounds range." << std::endl;
-        std::cout << "Analyzing central 80% of x-domain for vacuum gap instead." << std::endl;
-        x_search_start_for_gap = L_total_sim * 0.1;
-        x_search_end_for_gap = L_total_sim * 0.9;
-        // Ensure this fallback range is valid
-        if (x_search_start_for_gap >= x_search_end_for_gap) {
-            x_search_start_for_gap = 0.0;
-            x_search_end_for_gap = L_total_sim;
-        }
+    // Apply aluminum plates to permittivity map (if needed, for proton collision detection)
+    // Note: The field data is pre-computed with aluminum plates already considered
+    // This is just to ensure the eps_r_map used for material detection includes aluminum
+    GeometryConfig dummy_config;
+    dummy_config.h = h_for_simulation;
+    dummy_config.x_free_space = geom.x_fs;
+    dummy_config.x_structure_len = geom.x_sl;
+    dummy_config.aluminum_plate_thickness = 1.0e-6; // 1 µm
+    dummy_config.eps_aluminum = 1000.0;
+    
+    // Only apply if we have valid geometry parameters
+    if (geom.x_fs > 0 && geom.x_sl > 0) {
+        std::cout << "\n=== Applying Aluminum Plates to Loaded Permittivity Map ===" << std::endl;
+        addAluminumPlates(eps_r_map_data, dummy_config, Nx, Ny);
     }
     
-    std::cout << "Searching for vacuum channel for proton initialization by analyzing x-range: [" 
-              << x_search_start_for_gap * 1e6 << ", " << x_search_end_for_gap * 1e6 << "] um." << std::endl;
+    // Calculate the vacuum gap specifically at the initial proton position
+    // This ensures protons start at the correct gap height at the beginning of the structure
+    double x_search_for_gap = initial_x_position_m;
+    double x_search_start_for_gap = x_search_for_gap - 0.5 * h_for_simulation; // Small window around initial position
+    double x_search_end_for_gap = x_search_for_gap + 0.5 * h_for_simulation;
+    
+    // Ensure search range is within bounds
+    x_search_start_for_gap = std::max(x_search_start_for_gap, 0.0);
+    x_search_end_for_gap = std::min(x_search_end_for_gap, L_total_sim);
+    
+    if (x_search_start_for_gap >= x_search_end_for_gap) {
+        std::cerr << "Error: Invalid search range for vacuum gap calculation. Exiting." << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Calculating vacuum channel gap at initial proton position x = " 
+              << initial_x_position_m * 1e6 << " um (search range: [" 
+              << x_search_start_for_gap * 1e6 << ", " << x_search_end_for_gap * 1e6 << "] um)." << std::endl;
     
     double h_coords_for_vacuum_find = (h_from_coords_y > 1e-9) ? h_from_coords_y : h_from_coords_x;
     if (h_coords_for_vacuum_find <= 1e-9) h_coords_for_vacuum_find = h_for_simulation; // Last resort
 
-    std::pair<double, double> vacuum_channel = find_vacuum_channel_from_map(
-        eps_r_map_data, x_coords, y_coords, h_coords_for_vacuum_find,
-        x_search_start_for_gap, x_search_end_for_gap
-    );
-    double vacuum_gap_start_y = vacuum_channel.first;
-    double vacuum_gap_end_y = vacuum_channel.second;
+    double vacuum_gap_start_y, vacuum_gap_end_y;
+    
+    // Check if user specified y range manually
+    if (user_y_min_um > 0 && user_y_max_um > 0) {
+        // Use user-specified range
+        vacuum_gap_start_y = user_y_min_um * 1e-6; // Convert um to m
+        vacuum_gap_end_y = user_y_max_um * 1e-6;   // Convert um to m
+        std::cout << "Using user-specified y-range: [" << user_y_min_um << ", " << user_y_max_um << "] um" << std::endl;
+    } else {
+        // Automatic detection from permittivity map at the beginning of the structure
+        std::pair<double, double> vacuum_channel = find_vacuum_channel_from_map(
+            eps_r_map_data, x_coords, y_coords, h_coords_for_vacuum_find,
+            x_search_start_for_gap, x_search_end_for_gap
+        );
+        double gap_center_y = (vacuum_channel.first + vacuum_channel.second) / 2.0;
+        double emission_width_m = 10.0e-6; // 10 micrometers total width
+        
+        vacuum_gap_start_y = gap_center_y - emission_width_m / 2.0;
+        vacuum_gap_end_y = gap_center_y + emission_width_m / 2.0;
+        
+        std::cout << "Auto-detected gap center at y = " << gap_center_y*1e6 << " um" << std::endl;
+        std::cout << "Emission window: ±5 um around center = [" 
+                  << vacuum_gap_start_y*1e6 << ", " << vacuum_gap_end_y*1e6 << "] um" << std::endl;
+    }
 
     if (vacuum_gap_start_y >= vacuum_gap_end_y - (h_for_simulation * 0.5) ) { // Ensure gap is at least half a cell thick
         std::cerr << "Critical Error: Determined vacuum gap is too small or invalid [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]. Exiting." << std::endl;
         return 1;
     }
-    std::cout << "Proton initial y-distribution range (m) from epsilon_map: [" << vacuum_gap_start_y << ", " << vacuum_gap_end_y << "]" << std::endl;
     
     std::vector<Proton> protons(NUM_PROTONS);
 
-    // Allow user to specify RNG seed via command line (second argument), else use random_device
+    // Allow user to specify RNG seed via command line (fourth argument), else use random_device
+    // Usage: ./proton_simulator <folder> [y_min_um] [y_max_um] [rng_seed]
     unsigned int rng_seed = std::random_device{}();
-    if (argc > 2) {
+    if (argc > 4) {
         try {
-            rng_seed = static_cast<unsigned int>(std::stoul(argv[2]));
+            rng_seed = static_cast<unsigned int>(std::stoul(argv[4]));
             std::cout << "Using user-specified RNG seed: " << rng_seed << std::endl;
         } catch (...) {
             std::cerr << "Warning: Invalid RNG seed argument, using random_device." << std::endl;
@@ -639,16 +659,43 @@ int main(int argc, char* argv[]) { // Modified main signature
     }
     std::mt19937 rng(rng_seed);
 
-    // Use vacuum gap for y-distribution
-    std::uniform_real_distribution<double> dist_y(20e-6, 25e-6); // y in meters
-        
+    // Calculate emission range
+    double y_emit_min, y_emit_max;
+    
+    if (user_y_min_um > 0 && user_y_max_um > 0) {
+        // User specified values - use them directly without margins
+        y_emit_min = vacuum_gap_start_y;
+        y_emit_max = vacuum_gap_end_y;
+        std::cout << "Using user-specified y-emission range directly: [" 
+                  << y_emit_min*1e6 << ", " << y_emit_max*1e6 << "] um" << std::endl;
+    } else {
+        // Auto mode: already calculated as ±5 µm around center
+        y_emit_min = vacuum_gap_start_y;
+        y_emit_max = vacuum_gap_end_y;
+    }
+    
+    std::cout << "\n=== FINAL PROTON EMISSION PARAMETERS ===" << std::endl;
+    std::cout << "Initial X position: " << initial_x_position_m * 1e6 << " um" << std::endl;
+    std::cout << "Initial Y range: [" << y_emit_min * 1e6 << ", " << y_emit_max * 1e6 << "] um" << std::endl;
+    std::cout << "Y range width: " << (y_emit_max - y_emit_min) * 1e6 << " um" << std::endl;
+    std::cout << "Initial velocity: " << 2.768e6 << " m/s (40 keV)" << std::endl;
+    std::cout << "Angular spread: +/- 5 degrees (10 degree total range)" << std::endl;
+    std::cout << "========================================\n" << std::endl;
+    
+    std::uniform_real_distribution<double> dist_y(y_emit_min, y_emit_max);
+    std::uniform_real_distribution<double> dist_angle(-40.0 * M_PI / 180.0, 40.0 * M_PI / 180.0); // +/- 40 degrees in radians
+    double e_k_ev = 30.0; // 30 keV
+    const double v_total = std::sqrt(2 * e_k_ev * 1.60218e-19 / M_PROTON); // 1 keV proton velocity
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
         protons[i].id = i; // Assign ID
         protons[i].x = initial_x_position_m; 
         protons[i].y = dist_y(rng); // y in meters
-        protons[i].vx = 437.760; // Initial velocity in m/s, 1 KeV proton
-        protons[i].vy = 0.0; // Initial velocity in m/s
+
+        // Random initial direction within +/- 40 degrees
+        double angle = dist_angle(rng);
+        protons[i].vx = v_total * std::cos(angle); // x-component of velocity
+        protons[i].vy = v_total * std::sin(angle); // y-component of velocity
         protons[i].active = true;
 
         // Write initial state to the single file
@@ -695,7 +742,7 @@ int main(int argc, char* argv[]) { // Modified main signature
             double k4x, k4y, k4vx, k4vy;
 
             // k1 computation - original position and velocity
-            std::pair<double, double> a1 = get_acceleration(px, py, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            std::pair<double, double> a1 = get_acceleration(px, py, x_coords, y_coords, Ex_field, Ey_field, Nx, Ny);
             ax1 = a1.first;
             ay1 = a1.second;
             k1vx = TIME_STEP_S * ax1;
@@ -704,7 +751,7 @@ int main(int argc, char* argv[]) { // Modified main signature
             k1y = TIME_STEP_S * vy;
 
             // k2 computation - midpoint using k1
-            std::pair<double, double> a2 = get_acceleration(px + k1x*0.5, py + k1y*0.5, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            std::pair<double, double> a2 = get_acceleration(px + k1x*0.5, py + k1y*0.5, x_coords, y_coords, Ex_field, Ey_field, Nx, Ny);
             ax2 = a2.first;
             ay2 = a2.second;
             k2vx = TIME_STEP_S * ax2;
@@ -713,7 +760,7 @@ int main(int argc, char* argv[]) { // Modified main signature
             k2y = TIME_STEP_S * (vy + k1vy*0.5);
 
             // k3 computation - midpoint using k2
-            std::pair<double, double> a3 = get_acceleration(px + k2x*0.5, py + k2y*0.5, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            std::pair<double, double> a3 = get_acceleration(px + k2x*0.5, py + k2y*0.5, x_coords, y_coords, Ex_field, Ey_field, Nx, Ny);
             ax3 = a3.first;
             ay3 = a3.second;
             k3vx = TIME_STEP_S * ax3;
@@ -722,7 +769,7 @@ int main(int argc, char* argv[]) { // Modified main signature
             k3y = TIME_STEP_S * (vy + k2vy*0.5);
 
             // k4 computation - endpoint using k3
-            std::pair<double, double> a4 = get_acceleration(px + k3x, py + k3y, x_coords, y_coords, Ex_field, Ey_field, h_for_simulation, Nx, Ny);
+            std::pair<double, double> a4 = get_acceleration(px + k3x, py + k3y, x_coords, y_coords, Ex_field, Ey_field, Nx, Ny);
             ax4 = a4.first;
             ay4 = a4.second;
             k4vx = TIME_STEP_S * ax4;
@@ -773,7 +820,7 @@ int main(int argc, char* argv[]) { // Modified main signature
             }
 
             // Check for material collision or out of bounds - less frequent condition
-            if (p.active && is_in_material_or_out_of_bounds(px, py, x_coords, y_coords, eps_r_map_data, h_for_simulation, L_total_sim, H_total_sim)) {
+            if (p.active && is_in_material_or_out_of_bounds(px, py, x_coords, y_coords, eps_r_map_data, L_total_sim, H_total_sim)) {
                 p.active = false;
                 
                 #pragma omp atomic update

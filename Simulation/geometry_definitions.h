@@ -30,9 +30,15 @@ struct GeometryConfig {
     double x_free_space; // µm
     double x_structure_len; // µm
     double H_total_val; // µm
+    double y_vacuum_padding_bottom; // µm
+    double y_vacuum_padding_top;    // µm
     double current_tolerance;
     double current_eps_material;
     double eps_vacuum_val; // Aggiunto per passarlo alla configurazione della permittività
+    
+    // Parametri per le piastre di alluminio (elettrodi)
+    double aluminum_plate_thickness; // µm - spessore delle piastre di alluminio ai bordi
+    double eps_aluminum; // Permittività relativa dell'alluminio (usata per identificare le piastre)
 };
 
 // Parametri specifici per la geometria "piana"
@@ -138,6 +144,14 @@ void setupDentiUgualiPermittivity(std::vector<std::vector<double>>& eps_r, // Ad
                                   const GeometryConfig& config,
                                   const DentiUgualiSpecificParams& du_params,
                                   int Nx, int Ny);
+
+// Force vertical symmetry in permittivity map
+void enforceVerticalSymmetry(std::vector<std::vector<double>>& eps_r, int Nx, int Ny);
+
+// Add aluminum plates to the permittivity map at the left and right boundaries
+void addAluminumPlates(std::vector<std::vector<double>>& eps_r,
+                       const GeometryConfig& config,
+                       int Nx, int Ny);
 
 // Funzione di setup delle condizioni al contorno
 void setupBoundaryConditions(std::vector<std::vector<double>>& V,

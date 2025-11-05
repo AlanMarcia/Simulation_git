@@ -26,82 +26,143 @@ std::string geometryTypeToString(GeometryType type) {
 
 void initializePianaGeometry(GeometryConfig& config, PianaSpecificParams& piana_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
-    config.L_total = 320.0;
-    config.x_free_space = 10.0;
+    config.L_total = 340.0;
+    config.x_free_space = 30.0;
     config.x_structure_len = 300.0;
-    config.H_total_val = 30.0;
+    config.y_vacuum_padding_bottom = 5.0;
+    config.y_vacuum_padding_top = 5.0;
     config.current_tolerance = 1e-3;
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
+    
+    // Parametri piastre di alluminio (elettrodi)
+    config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
+    config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
     piana_params.y_si_layer_thick = 10.0;
     piana_params.y_vacuum_gap_thick = 10.0;
+
+    config.H_total_val = config.y_vacuum_padding_bottom
+                        + piana_params.y_si_layer_thick
+                        + piana_params.y_vacuum_gap_thick
+                        + piana_params.y_si_layer_thick
+                        + config.y_vacuum_padding_top;
 }
 
 void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSpecificParams& piana_rastremata_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
-    config.L_total = 320.0;
-    config.x_free_space = 10.0;
-    config.x_structure_len = 300.0;
-    config.H_total_val = 45.0;
-    config.current_tolerance = 1e-3;
+    config.L_total = 1160.0;
+    config.x_free_space = 30.0;
+    config.x_structure_len = 1100.0;
+    config.y_vacuum_padding_bottom = 10.0;
+    config.y_vacuum_padding_top = 10.0;
+    config.current_tolerance = 1e-9;
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
+    
+    // Parametri piastre di alluminio (elettrodi)
+    config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
+    config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
-    piana_rastremata_params.y_si_layer_thick_start = 20.0; // Spessore iniziale 20 µm
+    piana_rastremata_params.y_si_layer_thick_start = 30.0; // Spessore iniziale 30 µm
     piana_rastremata_params.y_si_layer_thick_end = 14.0;    // Spessore finale 14 µm
-    piana_rastremata_params.y_vacuum_gap_thick = 5.0;     // Gap di vuoto
+    piana_rastremata_params.y_vacuum_gap_thick = 20.0;     // Gap di vuoto
+
+    const double max_si_thickness = std::max(piana_rastremata_params.y_si_layer_thick_start,
+                                             piana_rastremata_params.y_si_layer_thick_end);
+    config.H_total_val = config.y_vacuum_padding_bottom
+                        + max_si_thickness
+                        + piana_rastremata_params.y_vacuum_gap_thick
+                        + max_si_thickness
+                        + config.y_vacuum_padding_top;
 }
 
 void initializePianaVariabileGeometry(GeometryConfig& config, PianaVariabileSpecificParams& piana_variabile_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
-    config.L_total = 320.0;
-    config.x_free_space = 10.0;
+    config.L_total = 350.0;
+    config.x_free_space = 30.0;
     config.x_structure_len = 300.0;
-    config.H_total_val = 30.0;
+    config.y_vacuum_padding_bottom = 5.0;
+    config.y_vacuum_padding_top = 5.0;
     config.current_tolerance = 1e-3;
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
+    
+    // Parametri piastre di alluminio (elettrodi)
+    config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
+    config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
     piana_variabile_params.y_si_layer_thick_right = 10.0; // Spessore a destra 10 µm
     piana_variabile_params.y_si_layer_thick_left = 4.0;   // Spessore a sinistra 4 µm
     piana_variabile_params.y_vacuum_gap_thick = 10.0;     // Gap di vuoto
+
+    const double max_si_thickness = std::max(piana_variabile_params.y_si_layer_thick_right,
+                                             piana_variabile_params.y_si_layer_thick_left);
+    config.H_total_val = config.y_vacuum_padding_bottom
+                        + max_si_thickness
+                        + piana_variabile_params.y_vacuum_gap_thick
+                        + max_si_thickness
+                        + config.y_vacuum_padding_top;
 }
 
 void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasatiProfondiSpecificParams& denti_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
-    config.L_total = 320.0;
-    config.x_free_space = 10.0;
-    config.x_structure_len = 300.0;    config.H_total_val = 50.0; // Altezza maggiore per i denti
-    config.current_tolerance = 1e-5;
+    config.L_total = 1140.0;
+    config.x_free_space = 30.0;
+    config.x_structure_len = 1100.0;
+    config.y_vacuum_padding_bottom = 10.0;
+    config.y_vacuum_padding_top = 10.0;
+    config.current_tolerance = 1e-9; // INCREASED from 1e-5 for faster convergence with high voltages
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
+    
+    // Parametri piastre di alluminio (elettrodi)
+    config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
+    config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
-    denti_params.y_si_base_height = 10.0;
+    denti_params.y_si_base_height = 40.0;
     denti_params.initial_y_teeth_height = 10.0;
     denti_params.y_teeth_height_decrement = 1.0;
-    denti_params.x_teeth_width = 10.0;
+    denti_params.x_teeth_width = 20.0;
     denti_params.initial_x_spacing_width = 10.0;
     denti_params.x_spacing_width_increment = 2.0;
     denti_params.initial_y_spacing_dig_depth = 0.0;
     denti_params.y_spacing_dig_depth_increment = 1.0;
-    denti_params.y_vacuum_gap_thick = 10.0;
+    denti_params.y_vacuum_gap_thick = 20.0;
+    
+    config.H_total_val = config.y_vacuum_padding_bottom
+                        + denti_params.y_si_base_height * 2
+                        + denti_params.initial_y_teeth_height * 2
+                        + denti_params.y_vacuum_gap_thick
+                        + config.y_vacuum_padding_top;
 }
 
 void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificParams& du_params, double common_h, double eps_sio2, double eps_vac) {
     config.h = common_h;
-    config.L_total = 320.0;
-    config.x_free_space = 10.0;
-    config.x_structure_len = 300.0;    config.H_total_val = 50.0; // Example H_total for denti uguali
-    config.current_tolerance = 1e-5;
+    config.L_total = 1140.0;
+    config.x_free_space = 30.0;
+    config.x_structure_len = 1100.0;
+    config.y_vacuum_padding_bottom = 5.0;
+    config.y_vacuum_padding_top = 5.0;
+    
+    // Parametri piastre di alluminio (elettrodi)
+    config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
+    config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
+    
+    du_params.y_si_base_height = 30.0;
+    du_params.y_tooth_height = 15.0;
+    du_params.x_tooth_width = 30.0;
+    du_params.x_spacing_width = 30.0; // Spacing between teeth
+    du_params.y_vacuum_gap_thick = 30.0;
+    
+    config.H_total_val = config.y_vacuum_padding_bottom
+                        + du_params.y_si_base_height * 2
+                        + du_params.y_tooth_height * 2
+                        + du_params.y_vacuum_gap_thick
+                        + config.y_vacuum_padding_top;
+    config.current_tolerance = 1e-9; // For faster convergence
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
-
-    du_params.y_si_base_height = 10.0;
-    du_params.y_tooth_height = 5.0;
-    du_params.x_tooth_width = 10.0;
-    du_params.x_spacing_width = 10.0; // Spacing between teeth
-    du_params.y_vacuum_gap_thick = 20.0;
 }
 
 PointMaterialInfo get_denti_point_x_info(double x_target_rel, double total_struct_len,
@@ -156,19 +217,27 @@ void setupPianaPermittivity(std::vector<std::vector<double>>& eps_r,
                             int Nx, int Ny) {
     const int idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
     const int idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
-    const int idx_y_si_bot_end = static_cast<int>(piana_params.y_si_layer_thick / config.h);
-    const int idx_y_si_top_start = static_cast<int>((piana_params.y_si_layer_thick + piana_params.y_vacuum_gap_thick) / config.h);
+    const int bottom_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_bottom / config.h));
+    const int top_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_top / config.h));
+    const int bottom_si_cells = static_cast<int>(std::round(piana_params.y_si_layer_thick / config.h));
+    const int top_si_cells = bottom_si_cells; // geometria simmetrica
+
+    const int idx_y_si_bot_start = bottom_pad_cells;
+    const int idx_y_si_bot_end = idx_y_si_bot_start + bottom_si_cells;
+    const int idx_y_top_pad_start = Ny - top_pad_cells;
+    const int idx_y_si_top_start = idx_y_top_pad_start - top_si_cells;
+    const int idx_y_si_top_end = idx_y_top_pad_start;
 
     for (int i = 0; i < Nx; ++i) {
         for (int j = 0; j < Ny; ++j) {
             eps_r[i][j] = config.eps_vacuum_val; // Default to vacuum
             if (i >= idx_x_struct_start && i <= idx_x_struct_end) {
                 // Bottom Layer
-                if (j >= 0 && j <= idx_y_si_bot_end) {
+                if (j >= idx_y_si_bot_start && j <= idx_y_si_bot_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
                 // Top Layer
-                if (j >= idx_y_si_top_start && j < Ny) {
+                if (j >= idx_y_si_top_start && j < idx_y_si_top_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
             }
@@ -182,6 +251,10 @@ void setupPianaRastremataPermittivity(std::vector<std::vector<double>>& eps_r,
                                       int Nx, int Ny) {
     const int idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
     const int idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    const int bottom_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_bottom / config.h));
+    const int top_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_top / config.h));
+    const int idx_y_bottom_pad_end = bottom_pad_cells;
+    const int idx_y_top_pad_start = Ny - top_pad_cells;
     
     for (int i = 0; i < Nx; ++i) {
         for (int j = 0; j < Ny; ++j) {
@@ -197,15 +270,17 @@ void setupPianaRastremataPermittivity(std::vector<std::vector<double>>& eps_r,
                 double current_top_thickness = current_bottom_thickness; // Stesso spessore sopra e sotto
                 
                 // Calcolo delle posizioni y: il canale si allarga automaticamente
-                const int idx_y_bottom_end = static_cast<int>(current_bottom_thickness / config.h);
-                const int idx_y_top_start = static_cast<int>((config.H_total_val - current_top_thickness) / config.h);
+                const int idx_y_bottom_end = idx_y_bottom_pad_end + static_cast<int>(std::round(current_bottom_thickness / config.h));
+                const int idx_y_bottom_start = idx_y_bottom_pad_end;
+                const int idx_y_top_start = idx_y_top_pad_start - static_cast<int>(std::round(current_top_thickness / config.h));
+                const int idx_y_top_end = idx_y_top_pad_start;
                 
                 // Bottom Layer (rastremata) - da y=0 a current_bottom_thickness
-                if (j >= 0 && j <= idx_y_bottom_end) {
+                if (j >= idx_y_bottom_start && j <= idx_y_bottom_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
                 // Top Layer (rastremata) - da (H_total - current_top_thickness) a H_total
-                if (j >= idx_y_top_start && j < Ny) {
+                if (j >= idx_y_top_start && j < idx_y_top_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
                 // Il vacuum gap (canale) è automaticamente la regione tra idx_y_bottom_end e idx_y_top_start
@@ -220,6 +295,10 @@ void setupPianaVariabilePermittivity(std::vector<std::vector<double>>& eps_r,
                                      int Nx, int Ny) {
     const int idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
     const int idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    const int bottom_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_bottom / config.h));
+    const int top_pad_cells = static_cast<int>(std::round(config.y_vacuum_padding_top / config.h));
+    const int idx_y_bottom_pad_end = bottom_pad_cells;
+    const int idx_y_top_pad_start = Ny - top_pad_cells;
     
     for (int i = 0; i < Nx; ++i) {
         for (int j = 0; j < Ny; ++j) {
@@ -237,15 +316,17 @@ void setupPianaVariabilePermittivity(std::vector<std::vector<double>>& eps_r,
                 double current_top_thickness = current_bottom_thickness; // Stesso spessore sopra e sotto
                 
                 // Calcolo delle posizioni y: il canale si allarga automaticamente
-                const int idx_y_bottom_end = static_cast<int>(current_bottom_thickness / config.h);
-                const int idx_y_top_start = static_cast<int>((config.H_total_val - current_top_thickness) / config.h);
+                const int idx_y_bottom_start = idx_y_bottom_pad_end;
+                const int idx_y_bottom_end = idx_y_bottom_start + static_cast<int>(std::round(current_bottom_thickness / config.h));
+                const int idx_y_top_end = idx_y_top_pad_start;
+                const int idx_y_top_start = idx_y_top_end - static_cast<int>(std::round(current_top_thickness / config.h));
                 
                 // Bottom Layer (variabile) - da y=0 a current_bottom_thickness
-                if (j >= 0 && j <= idx_y_bottom_end) {
+                if (j >= idx_y_bottom_start && j <= idx_y_bottom_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
                 // Top Layer (variabile) - da (H_total - current_top_thickness) a H_total
-                if (j >= idx_y_top_start && j < Ny) {
+                if (j >= idx_y_top_start && j < idx_y_top_end) {
                     eps_r[i][j] = config.current_eps_material;
                 }
                 // Il vacuum gap (canale) è automaticamente la regione tra idx_y_bottom_end e idx_y_top_start
@@ -265,17 +346,23 @@ void setupDentiSfasatiProfondiPermittivity(std::vector<std::vector<double>>& eps
             double x_abs = i * config.h;
             double y_abs = j * config.h;
 
+            const double y_bottom_pad = config.y_vacuum_padding_bottom;
+            const double y_top_pad = config.y_vacuum_padding_top;
+
             if (x_abs >= config.x_free_space && x_abs < (config.x_free_space + config.x_structure_len)) {
                 double x_coord_in_structure = x_abs - config.x_free_space;
                 PointMaterialInfo x_info = get_denti_point_x_info(x_coord_in_structure, config.x_structure_len, denti_params);
 
                 double current_tooth_h = x_info.current_tooth_height_at_x;
-                double y_bottom_base_top = denti_params.y_si_base_height;
+                double y_bottom_base_start = y_bottom_pad;
+                double y_bottom_base_top = y_bottom_base_start + denti_params.y_si_base_height;
                 double y_actual_bottom_teeth_tip = y_bottom_base_top + (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
-                double y_actual_top_teeth_tip = config.H_total_val - y_bottom_base_top - (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
+                double y_top_base_top = config.H_total_val - y_top_pad;
+                double y_top_base_bottom = y_top_base_top - denti_params.y_si_base_height;
+                double y_actual_top_teeth_tip = y_top_base_bottom - (x_info.is_silicon_tooth_region ? current_tooth_h : 0.0);
 
                 // Bottom Base region
-                if (y_abs >= 0 && y_abs < y_bottom_base_top) {
+                if (y_abs >= y_bottom_base_start && y_abs < y_bottom_base_top) {
                     if (x_info.is_silicon_tooth_region) {
                         eps_r[i][j] = config.current_eps_material;
                     } else {
@@ -291,12 +378,12 @@ void setupDentiSfasatiProfondiPermittivity(std::vector<std::vector<double>>& eps
                 }
                 // Top Teeth Region
                 else if (x_info.is_silicon_tooth_region && current_tooth_h > 0 &&
-                         y_abs >= y_actual_top_teeth_tip && y_abs < (config.H_total_val - y_bottom_base_top)) {
+                         y_abs >= y_actual_top_teeth_tip && y_abs < y_top_base_bottom) {
                      eps_r[i][j] = config.current_eps_material;
                 }
                 // Top Base Region
-                else if (y_abs >= (config.H_total_val - y_bottom_base_top) && y_abs < config.H_total_val) {
-                    double y_top_base_bottom_surface = config.H_total_val - y_bottom_base_top;
+                else if (y_abs >= y_top_base_bottom && y_abs < y_top_base_top) {
+                    double y_top_base_bottom_surface = y_top_base_bottom;
                     if (x_info.is_silicon_tooth_region) {
                         eps_r[i][j] = config.current_eps_material;
                     } else {
@@ -315,6 +402,8 @@ void setupDentiUgualiPermittivity(std::vector<std::vector<double>>& eps_r,
                                   const DentiUgualiSpecificParams& du_params,
                                   int Nx, int Ny) {
     double period = du_params.x_tooth_width + du_params.x_spacing_width;
+    const double y_bottom_pad = config.y_vacuum_padding_bottom;
+    const double y_top_pad = config.y_vacuum_padding_top;
 
     for (int i = 0; i < Nx; ++i) {
         for (int j = 0; j < Ny; ++j) {
@@ -339,18 +428,21 @@ void setupDentiUgualiPermittivity(std::vector<std::vector<double>>& eps_r,
                 // The typical "denti uguali" has teeth facing each other across the gap.
 
                 // Bottom silicon layer: base + teeth
-                double y_bottom_base_top = du_params.y_si_base_height;
+                double y_bottom_base_start = y_bottom_pad;
+                double y_bottom_base_top = y_bottom_base_start + du_params.y_si_base_height;
                 double y_bottom_tooth_tip = y_bottom_base_top + du_params.y_tooth_height;
 
-                if (y_abs < y_bottom_base_top) { // In bottom base
+                if (y_abs >= y_bottom_base_start && y_abs < y_bottom_base_top) { // In bottom base
                     eps_r[i][j] = config.current_eps_material;
-                } else if (y_abs < y_bottom_tooth_tip && is_in_bottom_tooth_x_range) { // In bottom tooth
+                } else if (y_abs >= y_bottom_base_top && y_abs < y_bottom_tooth_tip && is_in_bottom_tooth_x_range) { // In bottom tooth
                     eps_r[i][j] = config.current_eps_material;
                 }
 
                 // Top silicon layer: base + teeth (inverted)
-                double y_top_base_bottom = config.H_total_val - du_params.y_si_base_height;
-                double y_top_tooth_root = y_top_base_bottom - du_params.y_tooth_height; // Tip of tooth points downwards
+                double y_top_base_top = config.H_total_val - y_top_pad;
+                double y_top_base_bottom = y_top_base_top - du_params.y_si_base_height;
+                double y_top_tooth_root = y_top_base_bottom;
+                double y_top_tooth_tip = y_top_tooth_root - du_params.y_tooth_height; // Tip of tooth points downwards
 
                 // For interdigitating, top teeth are often shifted.
                 // If top teeth are aligned with bottom spaces:
@@ -359,15 +451,87 @@ void setupDentiUgualiPermittivity(std::vector<std::vector<double>>& eps_r,
                 // bool is_in_top_tooth_x_range = is_in_bottom_tooth_x_range;
 
 
-                if (y_abs >= y_top_base_bottom) { // In top base
+                if (y_abs >= y_top_base_bottom && y_abs < y_top_base_top) { // In top base
                     eps_r[i][j] = config.current_eps_material;
-                } else if (y_abs >= y_top_tooth_root && is_in_bottom_tooth_x_range) { // In top tooth (assuming aligned with bottom for simplicity)
+                } else if (y_abs >= y_top_tooth_tip && y_abs < y_top_tooth_root && is_in_bottom_tooth_x_range) { // In top tooth (assuming alignment)
                                                                                 // Change is_in_bottom_tooth_x_range to a different logic for interdigitated
                     eps_r[i][j] = config.current_eps_material;
                 }
             }
         }
     }
+}
+
+// Force vertical symmetry in permittivity map to eliminate numerical asymmetry
+void enforceVerticalSymmetry(std::vector<std::vector<double>>& eps_r, int Nx, int Ny) {
+    int y_center = Ny / 2;
+    
+    #pragma omp parallel for
+    for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < y_center; ++j) {
+            // Make top half mirror of bottom half
+            int j_mirror = Ny - 1 - j;
+            // Use average to maintain consistency
+            double avg_eps = (eps_r[i][j] + eps_r[i][j_mirror]) * 0.5;
+            eps_r[i][j] = avg_eps;
+            eps_r[i][j_mirror] = avg_eps;
+        }
+    }
+}
+
+// Funzione per aggiungere piastre di alluminio ai bordi sinistro e destro
+void addAluminumPlates(std::vector<std::vector<double>>& eps_r,
+                       const GeometryConfig& config,
+                       int Nx, int Ny) {
+    // Calcola gli indici per le piastre di alluminio
+    const int plate_thickness_cells = static_cast<int>(config.aluminum_plate_thickness / config.h);
+    const int x_struct_start_idx = static_cast<int>(config.x_free_space / config.h);
+    const int x_struct_end_idx = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    
+    std::cout << "\n=== Adding Aluminum Plates ===" << std::endl;
+    std::cout << "  Plate thickness: " << config.aluminum_plate_thickness << " um (" << plate_thickness_cells << " cells)" << std::endl;
+    std::cout << "  Silicon eps_r: " << config.current_eps_material << std::endl;
+    std::cout << "  Aluminum eps_r: " << config.eps_aluminum << std::endl;
+    std::cout << "  Left plate region: x = " << x_struct_start_idx * config.h 
+              << " to " << (x_struct_start_idx + plate_thickness_cells) * config.h << " um" << std::endl;
+    std::cout << "  Right plate region: x = " << (x_struct_end_idx - plate_thickness_cells) * config.h 
+              << " to " << x_struct_end_idx * config.h << " um" << std::endl;
+    
+    int left_plate_cells_added = 0;
+    int right_plate_cells_added = 0;
+    
+    // Piastra sinistra: all'INIZIO della struttura (sostituisce il silicio iniziale)
+    // Applica alluminio SOLO dove c'è già silicio (non nel gap di vuoto)
+    for (int i = x_struct_start_idx; i < std::min(Nx, x_struct_start_idx + plate_thickness_cells); ++i) {
+        if (i >= 0 && i < Nx) {
+            for (int j = 0; j < Ny; ++j) {
+                // Applica alluminio solo se c'è già materiale (silicio)
+                if (std::abs(eps_r[i][j] - config.current_eps_material) < 1e-3) {
+                    eps_r[i][j] = config.eps_aluminum; // Sostituisci silicio con alluminio
+                    left_plate_cells_added++;
+                }
+            }
+        }
+    }
+    
+    // Piastra destra: alla FINE della struttura (sostituisce il silicio finale)
+    // Applica alluminio SOLO dove c'è già silicio (non nel gap di vuoto)
+    for (int i = std::max(0, x_struct_end_idx - plate_thickness_cells); i < x_struct_end_idx; ++i) {
+        if (i >= 0 && i < Nx) {
+            for (int j = 0; j < Ny; ++j) {
+                // Applica alluminio solo se c'è già materiale (silicio)
+                if (std::abs(eps_r[i][j] - config.current_eps_material) < 1e-3) {
+                    eps_r[i][j] = config.eps_aluminum; // Sostituisci silicio con alluminio
+                    right_plate_cells_added++;
+                }
+            }
+        }
+    }
+    
+    std::cout << "  Left plate: " << left_plate_cells_added << " cells converted to aluminum" << std::endl;
+    std::cout << "  Right plate: " << right_plate_cells_added << " cells converted to aluminum" << std::endl;
+    std::cout << "  Note: Aluminum plates applied only where silicon structure exists (gap remains open)" << std::endl;
+    std::cout << "================================\n" << std::endl;
 }
 
 
@@ -377,22 +541,32 @@ void setupBoundaryConditions(std::vector<std::vector<double>>& V,
                              const GeometryConfig& config,
                              double V_L, double V_R,
                              int Nx, int Ny) {
-    const int actual_idx_x_struct_start = static_cast<int>(config.x_free_space / config.h);
-    // Ensure end index is within bounds and represents the last column of the structure
-    const int actual_idx_x_struct_end = static_cast<int>((config.x_free_space + config.x_structure_len - config.h * 0.5) / config.h) ; 
-                                       // Subtracting h*0.5 ensures we get the index for points up to x_structure_len
-
-    for (int j = 0; j < Ny; ++j) {
-        if (actual_idx_x_struct_start >= 0 && actual_idx_x_struct_start < Nx) {
-            if (std::abs(eps_r[actual_idx_x_struct_start][j] - config.current_eps_material) < 1e-3) { // Check if it's material
-                V[actual_idx_x_struct_start][j] = V_L;
-                fixed_mask[actual_idx_x_struct_start][j] = true;
-            }
-        }
-        if (actual_idx_x_struct_end >= 0 && actual_idx_x_struct_end < Nx) {
-             if (std::abs(eps_r[actual_idx_x_struct_end][j] - config.current_eps_material) < 1e-3) { // Check if it's material
-                V[actual_idx_x_struct_end][j] = V_R;
-                fixed_mask[actual_idx_x_struct_end][j] = true;
+    // Calcola i confini delle piastre di alluminio
+    const int plate_thickness_cells = static_cast<int>(config.aluminum_plate_thickness / config.h);
+    const int x_struct_start_idx = static_cast<int>(config.x_free_space / config.h);
+    const int x_struct_end_idx = static_cast<int>((config.x_free_space + config.x_structure_len) / config.h);
+    
+    // Piastra sinistra: da x_struct_start_idx a x_struct_start_idx + plate_thickness_cells
+    const int left_plate_end_idx = x_struct_start_idx + plate_thickness_cells;
+    // Piastra destra: da x_struct_end_idx - plate_thickness_cells a x_struct_end_idx
+    const int right_plate_start_idx = x_struct_end_idx - plate_thickness_cells;
+    
+    // Applica il potenziale su TUTTE le celle di alluminio
+    for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+            // Se è alluminio, applica il potenziale appropriato
+            if (std::abs(eps_r[i][j] - config.eps_aluminum) < 1e-3) {
+                
+                // Piastra sinistra: V_L (massa)
+                if (i >= x_struct_start_idx && i < left_plate_end_idx) {
+                    V[i][j] = V_L;
+                    fixed_mask[i][j] = true;
+                }
+                // Piastra destra: V_R (alta tensione)
+                else if (i >= right_plate_start_idx && i < x_struct_end_idx) {
+                    V[i][j] = V_R;
+                    fixed_mask[i][j] = true;
+                }
             }
         }
     }
@@ -417,6 +591,8 @@ void saveGeometryParams(const std::string& filename,
     outfile << "x_free_space," << config.x_free_space << std::endl;
     outfile << "x_structure_len," << config.x_structure_len << std::endl;
     outfile << "H_total," << config.H_total_val << std::endl;
+    outfile << "y_vacuum_padding_bottom," << config.y_vacuum_padding_bottom << std::endl;
+    outfile << "y_vacuum_padding_top," << config.y_vacuum_padding_top << std::endl;
     outfile << "eps_material," << config.current_eps_material << std::endl;
     outfile << "eps_vacuum," << config.eps_vacuum_val << std::endl;
     outfile << "tolerance," << config.current_tolerance << std::endl;

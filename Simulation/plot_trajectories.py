@@ -115,37 +115,68 @@ def main(folder_path=None): # Add folder_path argument
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
-    # Plot geometry outlines using permittivity map
+    # Plot geometry outlines using permittivity map with support for 3 materials
     X_mesh, Y_mesh = np.meshgrid(x_coords, y_coords)
-      # Dynamically calculate outline_threshold from eps_r_data - optimized
-    outline_threshold = None
+    
+    # Detect multiple materials (vacuum, silicon, aluminum)
+    outline_threshold_silicon = None
+    outline_threshold_aluminum = None
+    
     if eps_r_data is not None:
-        # Use more efficient approach to find min and max values
-        eps_min = np.min(eps_r_data)
-        eps_max = np.max(eps_r_data)
+        # Get unique permittivity values
+        unique_eps = np.unique(eps_r_data)
+        unique_eps = np.sort(unique_eps)
         
-        # Only compute unique values if needed for reporting
-        if eps_min != eps_max and eps_max > eps_min + 0.5:
-            outline_threshold = (eps_min + eps_max) / 2.0
-            print(f"Dynamically calculated outline threshold for trajectories plot: {outline_threshold:.2f} (from eps_r min/max: {eps_min:.2f}, {eps_max:.2f})")
-        elif eps_min == eps_max:
-            print(f"Warning (trajectories plot): Permittivity data contains only one unique value ({eps_min:.2f}). No outlines will be drawn.")
+        if len(unique_eps) >= 3:
+            # We have vacuum (lowest), silicon (middle), aluminum (highest)
+            val_vacuum = unique_eps[0]
+            val_silicon = unique_eps[1]
+            val_aluminum = unique_eps[-1]
+            
+            # Threshold between vacuum and silicon
+            outline_threshold_silicon = (val_vacuum + val_silicon) / 2.0
+            # Threshold between silicon and aluminum
+            outline_threshold_aluminum = (val_silicon + val_aluminum) / 2.0
+            
+            print(f"Detected 3 materials for trajectories plot:")
+            print(f"  Vacuum: ε_r = {val_vacuum:.2f}")
+            print(f"  Silicon: ε_r = {val_silicon:.2f}")
+            print(f"  Aluminum: ε_r = {val_aluminum:.2f}")
+            print(f"  Silicon outline threshold: {outline_threshold_silicon:.2f}")
+            print(f"  Aluminum outline threshold: {outline_threshold_aluminum:.2f}")
+        elif len(unique_eps) == 2:
+            # Only 2 materials (vacuum and silicon/aluminum)
+            val_min = unique_eps[0]
+            val_max = unique_eps[1]
+            outline_threshold_silicon = (val_min + val_max) / 2.0
+            print(f"Detected 2 materials for trajectories plot: ε_r = {val_min:.2f}, {val_max:.2f}")
+            print(f"  Outline threshold: {outline_threshold_silicon:.2f}")
+        elif len(unique_eps) == 1:
+            print(f"Warning (trajectories plot): Permittivity data contains only one unique value ({unique_eps[0]:.2f}). No outlines will be drawn.")
         else:
-            print(f"Warning (trajectories plot): Permittivity values ({eps_min:.2f}-{eps_max:.2f}) are too close. Could not reliably determine outline threshold.")
+            print("Warning (trajectories plot): Could not determine material structure from permittivity data.")
     else:
         print("Warning (trajectories plot): Permittivity data (eps_r_data) is None. Cannot draw outlines.")
-
-    # eps_vac_assumed = 1.0 # Old method
-    # eps_si_assumed = 11.7 # Typical value for silicon # Old method
-    # outline_threshold = (eps_vac_assumed + eps_si_assumed) / 2.0 # Old method
     
-    if outline_threshold is not None:
-        ax.contour(X_mesh, Y_mesh, eps_r_data, levels=[outline_threshold], colors='blue', linewidths=0.8, linestyles='--')
-        # Add a proxy artist for the legend entry for structure outline
-        structure_outline_proxy = plt.Line2D([0], [0], linestyle="--", color="blue", label='Structure Outline (from εr)')
-    else:
-        # Create a dummy proxy if no outline is drawn, so legend logic doesn't break
-        structure_outline_proxy = plt.Line2D([0], [0], linestyle="none", label='Structure Outline (not drawn)')
+    # Draw outlines for different materials
+    legend_proxies = []
+    if outline_threshold_silicon is not None:
+        ax.contour(X_mesh, Y_mesh, eps_r_data, levels=[outline_threshold_silicon], 
+                  colors='blue', linewidths=1.5, linestyles='-')
+        silicon_proxy = plt.Line2D([0], [0], linestyle="-", color="blue", linewidth=1.5, label='Silicon Structure')
+        legend_proxies.append(silicon_proxy)
+    
+    # Skip aluminum plates in trajectory plot for clarity
+    # if outline_threshold_aluminum is not None:
+    #     ax.contour(X_mesh, Y_mesh, eps_r_data, levels=[outline_threshold_aluminum], 
+    #               colors='red', linewidths=1.5, linestyles='-')
+    #     aluminum_proxy = plt.Line2D([0], [0], linestyle="-", color="red", linewidth=1.5, label='Aluminum Electrodes')
+    #     legend_proxies.append(aluminum_proxy)
+    
+    if not legend_proxies:
+        # Create a dummy proxy if no outline is drawn
+        dummy_proxy = plt.Line2D([0], [0], linestyle="none", label='Structure (not drawn)')
+        legend_proxies.append(dummy_proxy)
         print("Skipping structure outline on trajectory plot as threshold could not be determined.")
     
     # ax.legend(handles=[structure_outline_proxy], loc='upper right') # Initial legend setup
@@ -182,7 +213,7 @@ def main(folder_path=None): # Add folder_path argument
         proton_ids = list(grouped_trajectories.groups.keys())
         num_protons_in_file = len(proton_ids)
         
-        num_trajectories_to_plot = min(num_protons_in_file, 1000)        # Plot a subset of trajectories - optimized
+        num_trajectories_to_plot = min(num_protons_in_file, 100)        # Plot a subset of trajectories - optimized
         # Pre-calculate conversion factor from m to μm
         convert_to_um = 1e6
         
@@ -326,8 +357,9 @@ def main(folder_path=None): # Add folder_path argument
     # Update legend to include both structure and trajectories if any were plotted
     handles, labels = ax.get_legend_handles_labels()
     custom_handles = []
-    if outline_threshold is not None: # Only add structure outline to legend if it was plotted
-        custom_handles.append(structure_outline_proxy)
+    
+    # Add all structure outlines that were plotted
+    custom_handles.extend(legend_proxies)
     
     if any(label == 'Proton Trajectories' for label in labels):
          # Find the trajectory handle to ensure it's included
@@ -634,17 +666,17 @@ def main(folder_path=None): # Add folder_path argument
             ax_anim.set_title(f"Motion of {NUM_PARTICLES} Protons")
 
             # Add structure contour if available - do this once
-            if eps_r_data is not None and outline_threshold is not None:
+            if eps_r_data is not None and outline_threshold_silicon is not None:
                 # Convert coordinates efficiently using broadcasting
                 # x_coords and y_coords are in μm, convert to meters for mesh
                 x_coords_m = np.array(x_coords)[:, np.newaxis] * 1e-6  # Add dimension for broadcasting
                 y_coords_m = np.array(y_coords)[np.newaxis, :] * 1e-6  # Add dimension for broadcasting
                 X_mesh_anim, Y_mesh_anim = np.meshgrid(x_coords_m.flatten(), y_coords_m.flatten())
                 
-                # Use a simpler contour for animation (fewer levels, simpler lines)
+                # Draw silicon outline only (skip aluminum for clarity)
                 ax_anim.contour(X_mesh_anim, Y_mesh_anim, eps_r_data, 
-                               levels=[outline_threshold], colors='blue', 
-                               linewidths=0.8, linestyles='--')            # Pre-compute particle positions for all time steps
+                               levels=[outline_threshold_silicon], colors='blue', 
+                               linewidths=1.5, linestyles='-')            # Pre-compute particle positions for all time steps
             # This is a major optimization to avoid doing lookups in every animation frame
             print("Pre-computing particle positions for animation...")
             particle_positions = {}
