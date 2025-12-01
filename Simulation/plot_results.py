@@ -229,16 +229,26 @@ def plot_results(folder_path=None): # Add folder_path argument
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "potential_plot.png"), dpi=300)
 
-    # Plot 2: Electric Field Magnitude
+    # Plot 2: Electric Field Magnitude (Vacuum Only)
     plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
     ax_Emag = plt.gca()
-    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag, levels=50, cmap='hot') # E_mag is (Ny, Nx)
+    
+    # Create a masked version of E_mag for vacuum only
+    E_mag_vacuum = E_mag.copy()
+    if outline_threshold_silicon is not None:
+        # Mask regions where eps_r >= threshold (i.e., silicon and aluminum)
+        mask_not_vacuum = (eps_r >= outline_threshold_silicon)
+        E_mag_vacuum[mask_not_vacuum] = np.nan  # Set non-vacuum regions to NaN
+    else:
+        print("Warning: Could not determine vacuum regions for E_mag plot. Plotting everywhere.")
+    
+    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag_vacuum, levels=50, cmap='hot') # E_mag_vacuum is (Ny, Nx), only vacuum
     plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/μm)')
-    ax_Emag.set_title('Electric Field Magnitude |E|')
+    ax_Emag.set_title('Electric Field Magnitude |E| (Vacuum Only)')
     ax_Emag.set_xlabel('x (μm)')
     ax_Emag.set_ylabel('y (μm)')
     ax_Emag.set_aspect('equal', adjustable='box')
-    draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'w--')
+    draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'k--')
     draw_detailed_outlines(ax_Emag, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder_name, "efield_magnitude_plot.png"), dpi=300)

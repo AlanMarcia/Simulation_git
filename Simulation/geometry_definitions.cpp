@@ -64,8 +64,8 @@ void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSp
     config.aluminum_plate_thickness = 1.0; // 1 µm di spessore
     config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
-    piana_rastremata_params.y_si_layer_thick_start = 30.0; // Spessore iniziale 30 µm
-    piana_rastremata_params.y_si_layer_thick_end = 14.0;    // Spessore finale 14 µm
+    piana_rastremata_params.y_si_layer_thick_start = 70.0; // Spessore iniziale 70 µm
+    piana_rastremata_params.y_si_layer_thick_end = 54.0;    // Spessore finale 54 µm
     piana_rastremata_params.y_vacuum_gap_thick = 20.0;     // Gap di vuoto
 
     const double max_si_thickness = std::max(piana_rastremata_params.y_si_layer_thick_start,

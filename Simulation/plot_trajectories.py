@@ -7,10 +7,8 @@ import numpy as np # For NaN comparison if needed, and math.
 import sys # Import sys module for command-line arguments
 from functools import lru_cache  # For caching expensive operations
 import gc  # Garbage collection for managing memory
-
-# Set matplotlib to use a faster non-interactive backend
-# Use 'Agg' backend for better performance when generating plots to files
-plt.switch_backend('Agg')
+import matplotlib
+matplotlib.use('TkAgg', force=True)  # Forza l'uso del backend interattivo
 
 # Physical constants
 M_PROTON_KG = 1.67262192e-27  # Mass of proton in kg

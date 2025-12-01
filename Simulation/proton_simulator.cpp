@@ -40,14 +40,28 @@ const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
 const int NUM_PROTONS = 50000;
-const double TIME_STEP_S = 1e-13;       // Time step in seconds (SI)
-const double TOTAL_SIM_TIME_S = 1e-8;  // Total simulation time in seconds (SI)
-const double OUTPUT_TIME_INTERVAL_S = 1e-11; // Interval for writing trajectory data (SI)
+const double TOTAL_SIM_TIME_S = 1e-9;  // Total simulation time in seconds (SI)
+// TIME_STEP_S and OUTPUT_TIME_INTERVAL_S will be calculated dynamically in main()
 // Initial X position will be set in main after loading geometry, in meters
 
 const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 1.1; // If eps_r > this, it's material (vacuum is ~1.0)
 
 inline int find_cell_index(const std::vector<double>& coords, double pos);
+
+// --- Helper Functions for Adaptive Time Step Calculation ---
+double calculate_time_step(double e_k_keV, double h_grid_m, double cfl_factor = 0.05) {
+    const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19; // Convert keV to Joules
+    const double v_max = std::sqrt(2 * e_k_J / M_PROTON); // Maximum velocity (m/s)
+    const double dt = cfl_factor * h_grid_m / v_max;
+    return dt;
+}
+
+double calculate_output_interval(double e_k_keV, double L_device_m, int points_per_trajectory = 100) {
+    const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19;
+    const double v_proton = std::sqrt(2 * e_k_J / M_PROTON);
+    const double T_transit = L_device_m / v_proton; // Time to traverse the device
+    return T_transit / points_per_trajectory;
+}
 
 // --- Structures ---
 struct Proton {
@@ -560,8 +574,40 @@ int main(int argc, char* argv[]) { // Modified main signature
         return 1;
      }
 
+    // --- Calculate Adaptive Time Step Parameters ---
+    // Physical parameters for time step calculation
+    const double e_k_initial_keV = 10.0; // Initial proton energy in keV
+    const double CFL_FACTOR = 0.05; // Safety factor for CFL condition (0.05 = 5%)
+    const int POINTS_PER_TRAJECTORY = 1000; // Number of output points along the entire trajectory
+    
+    // Calculate adaptive time step based on CFL condition
+    const double TIME_STEP_S = calculate_time_step(e_k_initial_keV, h_for_simulation, CFL_FACTOR);
+    
+    // Calculate output interval based on device transit time
+    const double OUTPUT_TIME_INTERVAL_S = calculate_output_interval(e_k_initial_keV, L_total_sim, POINTS_PER_TRAJECTORY);
+    
+    // Calculate initial proton velocity for verification
+    const double e_k_initial_J = e_k_initial_keV * 1000.0 * 1.60218e-19;
+    const double v_initial = std::sqrt(2 * e_k_initial_J / M_PROTON);
+    const double T_transit = L_total_sim / v_initial; // Transit time through device
+    
+    // Print calculated parameters
+    std::cout << "\n=== ADAPTIVE TIME STEP PARAMETERS ===" << std::endl;
+    std::cout << "Initial proton energy: " << e_k_initial_keV << " keV" << std::endl;
+    std::cout << "Initial proton velocity: " << v_initial / 1e6 << " × 10^6 m/s" << std::endl;
+    std::cout << "Device length: " << L_total_sim * 1e6 << " µm (" << L_total_sim * 1e3 << " mm)" << std::endl;
+    std::cout << "Grid spacing (h): " << h_for_simulation * 1e6 << " µm" << std::endl;
+    std::cout << "CFL factor: " << CFL_FACTOR << std::endl;
+    std::cout << "Calculated TIME_STEP: " << TIME_STEP_S << " s (" << TIME_STEP_S * 1e15 << " fs)" << std::endl;
+    std::cout << "Expected transit time: " << T_transit * 1e9 << " ns" << std::endl;
+    std::cout << "OUTPUT_TIME_INTERVAL: " << OUTPUT_TIME_INTERVAL_S << " s (" << OUTPUT_TIME_INTERVAL_S * 1e12 << " ps)" << std::endl;
+    std::cout << "Total simulation time: " << TOTAL_SIM_TIME_S << " s (" << TOTAL_SIM_TIME_S * 1e9 << " ns)" << std::endl;
+    std::cout << "Target output points per trajectory: " << POINTS_PER_TRAJECTORY << std::endl;
+    std::cout << "Estimated total steps: " << static_cast<int>(TOTAL_SIM_TIME_S / TIME_STEP_S) << std::endl;
+    std::cout << "Estimated output points per proton: " << static_cast<int>(TOTAL_SIM_TIME_S / OUTPUT_TIME_INTERVAL_S) << std::endl;
+    std::cout << "======================================\n" << std::endl;
 
-    double initial_x_position_m = 20e-6;
+    double initial_x_position_m = 0e-6;
     
     std::vector<std::vector<double>> Ex_field, Ey_field; 
     std::vector<std::vector<double>> eps_r_map_data;     
@@ -683,8 +729,8 @@ int main(int argc, char* argv[]) { // Modified main signature
     std::cout << "========================================\n" << std::endl;
     
     std::uniform_real_distribution<double> dist_y(y_emit_min, y_emit_max);
-    std::uniform_real_distribution<double> dist_angle(-40.0 * M_PI / 180.0, 40.0 * M_PI / 180.0); // +/- 40 degrees in radians
-    double e_k_ev = 30.0; // 30 keV
+    std::uniform_real_distribution<double> dist_angle(-5.0 * M_PI / 180.0, 5.0 * M_PI / 180.0); // +/- 5 degrees in radians
+    double e_k_ev = 10000.0; // 10 keV
     const double v_total = std::sqrt(2 * e_k_ev * 1.60218e-19 / M_PROTON); // 1 keV proton velocity
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
