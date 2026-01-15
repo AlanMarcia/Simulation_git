@@ -4,6 +4,7 @@ import os
 import csv
 import glob # For finding trajectory files
 import sys # Import sys module for command-line arguments
+import matplotlib.colors as mcolors
 
 # Constants for energy calculation
 M_PROTON = 1.67262192e-27  # kg
@@ -230,7 +231,7 @@ def plot_results(folder_path=None): # Add folder_path argument
     plt.savefig(os.path.join(output_folder_name, "potential_plot.png"), dpi=300)
 
     # Plot 2: Electric Field Magnitude (Vacuum Only)
-    plt.figure(figsize=(8, 6)) # New figure for E-field Magnitude
+    plt.figure(figsize=(8,3)) # New figure for E-field Magnitude
     ax_Emag = plt.gca()
     
     # Create a masked version of E_mag for vacuum only
@@ -242,8 +243,8 @@ def plot_results(folder_path=None): # Add folder_path argument
     else:
         print("Warning: Could not determine vacuum regions for E_mag plot. Plotting everywhere.")
     
-    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag_vacuum, levels=50, cmap='hot') # E_mag_vacuum is (Ny, Nx), only vacuum
-    plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/μm)')
+    contour_Emag = ax_Emag.contourf(X_mesh, Y_mesh, E_mag_vacuum, levels=30, cmap='gnuplot') # E_mag_vacuum is (Ny, Nx), only vacuum
+    plt.colorbar(contour_Emag, ax=ax_Emag, label='Electric Field Magnitude (V/μm)', orientation='horizontal')
     ax_Emag.set_title('Electric Field Magnitude |E| (Vacuum Only)')
     ax_Emag.set_xlabel('x (μm)')
     ax_Emag.set_ylabel('y (μm)')
@@ -287,7 +288,7 @@ def plot_results(folder_path=None): # Add folder_path argument
     ax_Evec = plt.gca()
     
     # Downsample for quiver plot to avoid overcrowding
-    skip_rate = 5 # Adjust skip rate as needed
+    skip_rate = 3 # Adjust skip rate as needed
     # Ensure skip rate is not too large for the number of points, especially in y
     if y_coords.shape[0] // skip_rate < 2 : # Ensure at least 2 points in y after skipping if possible
         skip_rate_y = max(1, y_coords.shape[0] // 2 if y_coords.shape[0] > 1 else 1)
@@ -328,13 +329,15 @@ def plot_results(folder_path=None): # Add folder_path argument
     if not np.all(np.isnan(Ex_quiver[skip])):
         ax_Evec.quiver(X_mesh[skip], Y_mesh[skip], 
                        Ex_quiver[skip], Ey_quiver[skip], Emag_quiver[skip], 
-                       cmap='viridis', scale=None, scale_units='xy', angles='xy', 
+                       cmap='viridis', scale=20, scale_units='xy', angles='xy', 
                        headwidth=3, headlength=5, pivot='middle')
     
     ax_Evec.set_title('Electric Field Vectors in Vacuum (Quiver Plot)')
     ax_Evec.set_xlabel('x (μm)')
     ax_Evec.set_ylabel('y (μm)')
     ax_Evec.set_aspect('equal', adjustable='box')
+    ax_Evec.set_xlim(15,60)
+    ax_Evec.set_ylim(70,150)
     # Add structure outlines
     draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold_silicon, 'k--')
     draw_detailed_outlines(ax_Evec, X_mesh, Y_mesh, eps_r, outline_threshold_aluminum, 'r-')

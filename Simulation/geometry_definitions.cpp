@@ -56,7 +56,7 @@ void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSp
     config.x_structure_len = 1100.0;
     config.y_vacuum_padding_bottom = 10.0;
     config.y_vacuum_padding_top = 10.0;
-    config.current_tolerance = 1e-9;
+    config.current_tolerance = 1e-5;
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
     
@@ -66,7 +66,7 @@ void initializePianaRastremataGeometry(GeometryConfig& config, PianaRastremataSp
 
     piana_rastremata_params.y_si_layer_thick_start = 70.0; // Spessore iniziale 70 µm
     piana_rastremata_params.y_si_layer_thick_end = 54.0;    // Spessore finale 54 µm
-    piana_rastremata_params.y_vacuum_gap_thick = 20.0;     // Gap di vuoto
+    piana_rastremata_params.y_vacuum_gap_thick = 50.0;     // Gap di vuoto
 
     const double max_si_thickness = std::max(piana_rastremata_params.y_si_layer_thick_start,
                                              piana_rastremata_params.y_si_layer_thick_end);
@@ -153,14 +153,14 @@ void initializeDentiUgualiGeometry(GeometryConfig& config, DentiUgualiSpecificPa
     du_params.y_tooth_height = 15.0;
     du_params.x_tooth_width = 30.0;
     du_params.x_spacing_width = 30.0; // Spacing between teeth
-    du_params.y_vacuum_gap_thick = 30.0;
+    du_params.y_vacuum_gap_thick = 50.0;
     
     config.H_total_val = config.y_vacuum_padding_bottom
                         + du_params.y_si_base_height * 2
                         + du_params.y_tooth_height * 2
                         + du_params.y_vacuum_gap_thick
                         + config.y_vacuum_padding_top;
-    config.current_tolerance = 1e-9; // For faster convergence
+    config.current_tolerance = 1e-5; // For faster convergence
     config.current_eps_material = eps_sio2;
     config.eps_vacuum_val = eps_vac;
 }

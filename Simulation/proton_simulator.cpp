@@ -39,7 +39,7 @@ const double M_PROTON = 1.67262192e-27; // kg (SI)
 const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
-const int NUM_PROTONS = 50000;
+const int NUM_PROTONS = 10000;  // Reduced temporarily for testing
 const double TOTAL_SIM_TIME_S = 1e-9;  // Total simulation time in seconds (SI)
 // TIME_STEP_S and OUTPUT_TIME_INTERVAL_S will be calculated dynamically in main()
 // Initial X position will be set in main after loading geometry, in meters
@@ -49,7 +49,7 @@ const double REL_PERMITTIVITY_MATERIAL_THRESHOLD = 1.1; // If eps_r > this, it's
 inline int find_cell_index(const std::vector<double>& coords, double pos);
 
 // --- Helper Functions for Adaptive Time Step Calculation ---
-double calculate_time_step(double e_k_keV, double h_grid_m, double cfl_factor = 0.05) {
+double calculate_time_step(double e_k_keV, double h_grid_m, double cfl_factor = 0.01) {
     const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19; // Convert keV to Joules
     const double v_max = std::sqrt(2 * e_k_J / M_PROTON); // Maximum velocity (m/s)
     const double dt = cfl_factor * h_grid_m / v_max;
@@ -467,6 +467,11 @@ int main(int argc, char* argv[]) { // Modified main signature
         std::cout << "No input data folder specified, using default: " << input_base_folder_name << std::endl;
     }
     
+    // ============================================
+    // SIMULATION PARAMETERS (DEFINE ONCE)
+    // ============================================
+    const double INITIAL_PROTON_ENERGY_KEV = 50.0; // Initial proton energy in keV
+    
     // Parse optional y_min and y_max parameters (in micrometers)
     // Usage: ./proton_simulator <folder> [y_min_um] [y_max_um]
     if (argc > 2) {
@@ -515,7 +520,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     }
     
     // Set numeric precision once for the entire stream
-    all_trajectories_file_stream << std::scientific << std::setprecision(8);
+    all_trajectories_file_stream << std::scientific << std::setprecision(12);
     all_trajectories_file_stream << "proton_id,time_s,x_m,y_m,vx_m_per_s,vy_m_per_s\n";
 
 
@@ -576,24 +581,23 @@ int main(int argc, char* argv[]) { // Modified main signature
 
     // --- Calculate Adaptive Time Step Parameters ---
     // Physical parameters for time step calculation
-    const double e_k_initial_keV = 10.0; // Initial proton energy in keV
-    const double CFL_FACTOR = 0.05; // Safety factor for CFL condition (0.05 = 5%)
-    const int POINTS_PER_TRAJECTORY = 1000; // Number of output points along the entire trajectory
+    const double CFL_FACTOR = 0.01; // Safety factor for CFL condition (0.01 = 1% for high precision)
+    const int POINTS_PER_TRAJECTORY = 5000; // Number of output points along the entire trajectory
     
     // Calculate adaptive time step based on CFL condition
-    const double TIME_STEP_S = calculate_time_step(e_k_initial_keV, h_for_simulation, CFL_FACTOR);
+    const double TIME_STEP_S = calculate_time_step(INITIAL_PROTON_ENERGY_KEV, h_for_simulation, CFL_FACTOR);
     
     // Calculate output interval based on device transit time
-    const double OUTPUT_TIME_INTERVAL_S = calculate_output_interval(e_k_initial_keV, L_total_sim, POINTS_PER_TRAJECTORY);
+    const double OUTPUT_TIME_INTERVAL_S = calculate_output_interval(INITIAL_PROTON_ENERGY_KEV, L_total_sim, POINTS_PER_TRAJECTORY);
     
     // Calculate initial proton velocity for verification
-    const double e_k_initial_J = e_k_initial_keV * 1000.0 * 1.60218e-19;
+    const double e_k_initial_J = INITIAL_PROTON_ENERGY_KEV * 1000.0 * 1.60218e-19;
     const double v_initial = std::sqrt(2 * e_k_initial_J / M_PROTON);
     const double T_transit = L_total_sim / v_initial; // Transit time through device
     
     // Print calculated parameters
     std::cout << "\n=== ADAPTIVE TIME STEP PARAMETERS ===" << std::endl;
-    std::cout << "Initial proton energy: " << e_k_initial_keV << " keV" << std::endl;
+    std::cout << "Initial proton energy: " << INITIAL_PROTON_ENERGY_KEV << " keV" << std::endl;
     std::cout << "Initial proton velocity: " << v_initial / 1e6 << " × 10^6 m/s" << std::endl;
     std::cout << "Device length: " << L_total_sim * 1e6 << " µm (" << L_total_sim * 1e3 << " mm)" << std::endl;
     std::cout << "Grid spacing (h): " << h_for_simulation * 1e6 << " µm" << std::endl;
@@ -607,7 +611,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     std::cout << "Estimated output points per proton: " << static_cast<int>(TOTAL_SIM_TIME_S / OUTPUT_TIME_INTERVAL_S) << std::endl;
     std::cout << "======================================\n" << std::endl;
 
-    double initial_x_position_m = 0e-6;
+    double initial_x_position_m = 5e-6;
     
     std::vector<std::vector<double>> Ex_field, Ey_field; 
     std::vector<std::vector<double>> eps_r_map_data;     
@@ -720,18 +724,20 @@ int main(int argc, char* argv[]) { // Modified main signature
         y_emit_max = vacuum_gap_end_y;
     }
     
+    // Calculate initial proton velocity from the global energy constant
+    const double e_k_J = INITIAL_PROTON_ENERGY_KEV * 1000.0 * 1.60218e-19; // Convert keV -> eV -> Joules
+    const double v_total = std::sqrt(2 * e_k_J / M_PROTON); // Initial velocity in m/s
+    
     std::cout << "\n=== FINAL PROTON EMISSION PARAMETERS ===" << std::endl;
     std::cout << "Initial X position: " << initial_x_position_m * 1e6 << " um" << std::endl;
     std::cout << "Initial Y range: [" << y_emit_min * 1e6 << ", " << y_emit_max * 1e6 << "] um" << std::endl;
     std::cout << "Y range width: " << (y_emit_max - y_emit_min) * 1e6 << " um" << std::endl;
-    std::cout << "Initial velocity: " << 2.768e6 << " m/s (40 keV)" << std::endl;
+    std::cout << "Initial velocity: " << v_total << " m/s (" << INITIAL_PROTON_ENERGY_KEV << " keV)" << std::endl;
     std::cout << "Angular spread: +/- 5 degrees (10 degree total range)" << std::endl;
     std::cout << "========================================\n" << std::endl;
     
     std::uniform_real_distribution<double> dist_y(y_emit_min, y_emit_max);
-    std::uniform_real_distribution<double> dist_angle(-5.0 * M_PI / 180.0, 5.0 * M_PI / 180.0); // +/- 5 degrees in radians
-    double e_k_ev = 10000.0; // 10 keV
-    const double v_total = std::sqrt(2 * e_k_ev * 1.60218e-19 / M_PROTON); // 1 keV proton velocity
+    std::uniform_real_distribution<double> dist_angle(-2.0 * M_PI / 180.0, 2.0 * M_PI / 180.0); // +/- 5 degrees in radians
 
     for (int i = 0; i < NUM_PROTONS; ++i) {
         protons[i].id = i; // Assign ID

@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Selected output folder: " << output_folder_name << std::endl;
     std::cout << "Selected geometry type: " << geometryTypeToString(current_geometry_type) << std::endl;
 
-    const std::string base_simulation_dir = "/mnt/c/Users/admin/Desktop/Simulation_git/Simulation/";
+    const std::string base_simulation_dir = "./";
     const std::string output_folder = base_simulation_dir + output_folder_name; // Full path to final output directory
 
     // --- Create Output Directories Recursively ---
