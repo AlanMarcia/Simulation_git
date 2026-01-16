@@ -33,13 +33,13 @@
 #endif
 
 // --- Constants ---
-const double Q_PROTON = 1.60217663e-19; // Coulombs (SI)
-const double M_PROTON = 1.67262192e-27; // kg (SI)
-// K_ACCEL = Q_PROTON / M_PROTON, since E will be in V/m, acceleration will be m/s^2
-const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
+const double Q_ALPHA = 3.2043532e-19; // Coulombs (SI)
+const double M_ALPHA= 6.64465723e-27; // kg (SI)
+// K_ACCEL = Q_ALPHA / M_ALPHA, since E will be in V/m, acceleration will be m/s^2
+const double K_ACCEL = Q_ALPHA / M_ALPHA; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
-const int NUM_PROTONS = 10000;  // Reduced temporarily for testing
+const int NUM_ALPHAS = 10000;  // Reduced temporarily for testing
 const double TOTAL_SIM_TIME_S = 1e-9;  // Total simulation time in seconds (SI)
 // TIME_STEP_S and OUTPUT_TIME_INTERVAL_S will be calculated dynamically in main()
 // Initial X position will be set in main after loading geometry, in meters
@@ -51,14 +51,14 @@ inline int find_cell_index(const std::vector<double>& coords, double pos);
 // --- Helper Functions for Adaptive Time Step Calculation ---
 double calculate_time_step(double e_k_keV, double h_grid_m, double cfl_factor = 0.01) {
     const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19; // Convert keV to Joules
-    const double v_max = std::sqrt(2 * e_k_J / M_PROTON); // Maximum velocity (m/s)
+    const double v_max = std::sqrt(2 * e_k_J / M_ALPHA); // Maximum velocity (m/s)
     const double dt = cfl_factor * h_grid_m / v_max;
     return dt;
 }
 
 double calculate_output_interval(double e_k_keV, double L_device_m, int points_per_trajectory = 100) {
     const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19;
-    const double v_proton = std::sqrt(2 * e_k_J / M_PROTON);
+    const double v_proton = std::sqrt(2 * e_k_J / M_ALPHA);
     const double T_transit = L_device_m / v_proton; // Time to traverse the device
     return T_transit / points_per_trajectory;
 }
@@ -470,7 +470,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     // ============================================
     // SIMULATION PARAMETERS (DEFINE ONCE)
     // ============================================
-    const double INITIAL_PROTON_ENERGY_KEV = 50.0; // Initial proton energy in keV
+    const double INITIAL_ALPHA_ENERGY_KEV = 50.0; // Initial alpha energy in keV
     
     // Parse optional y_min and y_max parameters (in micrometers)
     // Usage: ./proton_simulator <folder> [y_min_um] [y_max_um]
@@ -585,20 +585,20 @@ int main(int argc, char* argv[]) { // Modified main signature
     const int POINTS_PER_TRAJECTORY = 5000; // Number of output points along the entire trajectory
     
     // Calculate adaptive time step based on CFL condition
-    const double TIME_STEP_S = calculate_time_step(INITIAL_PROTON_ENERGY_KEV, h_for_simulation, CFL_FACTOR);
+    const double TIME_STEP_S = calculate_time_step(INITIAL_ALPHA_ENERGY_KEV, h_for_simulation, CFL_FACTOR);
     
     // Calculate output interval based on device transit time
-    const double OUTPUT_TIME_INTERVAL_S = calculate_output_interval(INITIAL_PROTON_ENERGY_KEV, L_total_sim, POINTS_PER_TRAJECTORY);
+    const double OUTPUT_TIME_INTERVAL_S = calculate_output_interval(INITIAL_ALPHA_ENERGY_KEV, L_total_sim, POINTS_PER_TRAJECTORY);
     
-    // Calculate initial proton velocity for verification
-    const double e_k_initial_J = INITIAL_PROTON_ENERGY_KEV * 1000.0 * 1.60218e-19;
-    const double v_initial = std::sqrt(2 * e_k_initial_J / M_PROTON);
+    // Calculate initial alpha velocity for verification
+    const double e_k_initial_J = INITIAL_ALPHA_ENERGY_KEV * 1000.0 * 1.60218e-19;
+    const double v_initial = std::sqrt(2 * e_k_initial_J / M_ALPHA);
     const double T_transit = L_total_sim / v_initial; // Transit time through device
     
     // Print calculated parameters
     std::cout << "\n=== ADAPTIVE TIME STEP PARAMETERS ===" << std::endl;
-    std::cout << "Initial proton energy: " << INITIAL_PROTON_ENERGY_KEV << " keV" << std::endl;
-    std::cout << "Initial proton velocity: " << v_initial / 1e6 << " × 10^6 m/s" << std::endl;
+    std::cout << "Initial alpha energy: " << INITIAL_ALPHA_ENERGY_KEV << " keV" << std::endl;
+    std::cout << "Initial alpha velocity: " << v_initial / 1e6 << " × 10^6 m/s" << std::endl;
     std::cout << "Device length: " << L_total_sim * 1e6 << " µm (" << L_total_sim * 1e3 << " mm)" << std::endl;
     std::cout << "Grid spacing (h): " << h_for_simulation * 1e6 << " µm" << std::endl;
     std::cout << "CFL factor: " << CFL_FACTOR << std::endl;
@@ -692,7 +692,7 @@ int main(int argc, char* argv[]) { // Modified main signature
         return 1;
     }
     
-    std::vector<Proton> protons(NUM_PROTONS);
+    std::vector<Proton> protons(NUM_ALPHAS);
 
     // Allow user to specify RNG seed via command line (fourth argument), else use random_device
     // Usage: ./proton_simulator <folder> [y_min_um] [y_max_um] [rng_seed]
@@ -724,22 +724,22 @@ int main(int argc, char* argv[]) { // Modified main signature
         y_emit_max = vacuum_gap_end_y;
     }
     
-    // Calculate initial proton velocity from the global energy constant
-    const double e_k_J = INITIAL_PROTON_ENERGY_KEV * 1000.0 * 1.60218e-19; // Convert keV -> eV -> Joules
-    const double v_total = std::sqrt(2 * e_k_J / M_PROTON); // Initial velocity in m/s
+    // Calculate initial alpha velocity from the global energy constant
+    const double e_k_J = INITIAL_ALPHA_ENERGY_KEV * 1000.0 * 1.60218e-19; // Convert keV -> eV -> Joules
+    const double v_total = std::sqrt(2 * e_k_J / M_ALPHA); // Initial velocity in m/s
     
-    std::cout << "\n=== FINAL PROTON EMISSION PARAMETERS ===" << std::endl;
+    std::cout << "\n=== FINAL ALPHA EMISSION PARAMETERS ===" << std::endl;
     std::cout << "Initial X position: " << initial_x_position_m * 1e6 << " um" << std::endl;
     std::cout << "Initial Y range: [" << y_emit_min * 1e6 << ", " << y_emit_max * 1e6 << "] um" << std::endl;
     std::cout << "Y range width: " << (y_emit_max - y_emit_min) * 1e6 << " um" << std::endl;
-    std::cout << "Initial velocity: " << v_total << " m/s (" << INITIAL_PROTON_ENERGY_KEV << " keV)" << std::endl;
+    std::cout << "Initial velocity: " << v_total << " m/s (" << INITIAL_ALPHA_ENERGY_KEV << " keV)" << std::endl;
     std::cout << "Angular spread: +/- 5 degrees (10 degree total range)" << std::endl;
     std::cout << "========================================\n" << std::endl;
     
     std::uniform_real_distribution<double> dist_y(y_emit_min, y_emit_max);
     std::uniform_real_distribution<double> dist_angle(-2.0 * M_PI / 180.0, 2.0 * M_PI / 180.0); // +/- 5 degrees in radians
 
-    for (int i = 0; i < NUM_PROTONS; ++i) {
+    for (int i = 0; i < NUM_ALPHAS; ++i) {
         protons[i].id = i; // Assign ID
         protons[i].x = initial_x_position_m; 
         protons[i].y = dist_y(rng); // y in meters
@@ -757,10 +757,10 @@ int main(int argc, char* argv[]) { // Modified main signature
     double current_time = 0.0;
     int num_steps = static_cast<int>(TOTAL_SIM_TIME_S / TIME_STEP_S);
     int output_every_n_steps = static_cast<int>(std::max(1.0, OUTPUT_TIME_INTERVAL_S / TIME_STEP_S));
-    int active_protons_count = NUM_PROTONS;
+    int active_protons_count = NUM_ALPHAS;
     int protons_reached_end_successfully = 0; // Counter for successful protons
 
-    std::cout << "Starting simulation for " << NUM_PROTONS << " protons..." << std::endl;
+    std::cout << "Starting simulation for " << NUM_ALPHAS << " alphas..." << std::endl;
     std::cout << "Total steps: " << num_steps << ", Outputting every " << output_every_n_steps << " steps." << std::endl;
 
     // Main simulation loop with optimized iteration strategy
@@ -777,7 +777,7 @@ int main(int argc, char* argv[]) { // Modified main signature
 
         // Parallel region with optimized scheduling for better load balancing
         #pragma omp parallel for schedule(dynamic, 32)
-        for (int i = 0; i < NUM_PROTONS; ++i) {
+        for (int i = 0; i < NUM_ALPHAS; ++i) {
             // Skip inactive protons immediately
             if (!protons[i].active) continue;
 
@@ -923,10 +923,10 @@ int main(int argc, char* argv[]) { // Modified main signature
     delete[] output_buffer; // Clean up the buffer
 
     double success_percentage = 0.0;
-    if (NUM_PROTONS > 0) {
-        success_percentage = (static_cast<double>(protons_reached_end_successfully) / NUM_PROTONS) * 100.0;
+    if (NUM_ALPHAS > 0) {
+        success_percentage = (static_cast<double>(protons_reached_end_successfully) / NUM_ALPHAS) * 100.0;
     }
-    std::cout << protons_reached_end_successfully << " out of " << NUM_PROTONS << " protons reached the end successfully." << std::endl;
+    std::cout << protons_reached_end_successfully << " out of " << NUM_ALPHAS << " alphas reached the end successfully." << std::endl;
     std::cout << "Success percentage: " << std::fixed << std::setprecision(2) << success_percentage << "%" << std::endl;
 
     std::cout << "All proton trajectories saved to '" << all_trajectories_filename << "' (data in SI units)." << std::endl;
