@@ -1,4 +1,6 @@
 *.csv
+*.png 
+*.pdf
 Simulation/Silicio/geometria_Denti_sfasati_profondi_10um/all_proton_trajectories.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -96,4 +98,5 @@ target/
 *.lammpstrj
 
 # IPython NB Checkpoints
-.ipynb_checkpoints/
+#.ipynb_checkpoints/
+.github/copilot-instructions.md
