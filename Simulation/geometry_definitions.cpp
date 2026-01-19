@@ -121,14 +121,14 @@ void initializeDentiSfasatiProfondiGeometry(GeometryConfig& config, DentiSfasati
     config.eps_aluminum = 1000.0; // Valore alto per identificare il conduttore
 
     denti_params.y_si_base_height = 40.0;
-    denti_params.initial_y_teeth_height = 10.0;
+    denti_params.initial_y_teeth_height = 20.0;
     denti_params.y_teeth_height_decrement = 1.0;
     denti_params.x_teeth_width = 20.0;
     denti_params.initial_x_spacing_width = 10.0;
     denti_params.x_spacing_width_increment = 2.0;
     denti_params.initial_y_spacing_dig_depth = 0.0;
     denti_params.y_spacing_dig_depth_increment = 1.0;
-    denti_params.y_vacuum_gap_thick = 20.0;
+    denti_params.y_vacuum_gap_thick = 50.0;
     
     config.H_total_val = config.y_vacuum_padding_bottom
                         + denti_params.y_si_base_height * 2
