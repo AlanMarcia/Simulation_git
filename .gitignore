@@ -26,6 +26,7 @@ __pycache__/
 *.exe
 *.out
 *.app
+*.fld
 
 # Distribution / packaging
 .Python
