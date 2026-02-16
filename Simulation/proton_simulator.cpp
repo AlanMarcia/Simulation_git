@@ -33,10 +33,10 @@
 #endif
 
 // --- Constants ---
-const double Q_PROTON = 1.60217663e-19; // Coulombs (SI) - Elementary charge
-const double M_PROTON = 1.6726219e-27;  // kg (SI) - Proton mass
-// K_ACCEL = Q_PROTON / M_PROTON, since E will be in V/m, acceleration will be m/s^2
-const double K_ACCEL = Q_PROTON / M_PROTON; // SI units: (C/kg) * (V/m) -> m/s^2
+const double Q_ALPHA = 3.2043532e-19; // Coulombs (SI) - Elementary charge (2 * elementary charge)
+const double M_ALPHA = 6.644657e-27;  // kg (SI) - Alpha particle mass
+// K_ACCEL = Q_ALPHA / M_ALPHA, since E will be in V/m, acceleration will be m/s^2
+const double K_ACCEL = Q_ALPHA / M_ALPHA; // SI units: (C/kg) * (V/m) -> m/s^2
 
 // --- Simulation Parameters ---
 const int NUM_ALPHAS = 10000;  // Reduced temporarily for testing
@@ -51,14 +51,14 @@ inline int find_cell_index(const std::vector<double>& coords, double pos);
 // --- Helper Functions for Adaptive Time Step Calculation ---
 double calculate_time_step(double e_k_keV, double h_grid_m, double cfl_factor = 0.01) {
     const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19; // Convert keV to Joules
-    const double v_max = std::sqrt(2 * e_k_J / M_PROTON); // Maximum velocity (m/s)
+    const double v_max = std::sqrt(2 * e_k_J / M_ALPHA); // Maximum velocity (m/s)
     const double dt = cfl_factor * h_grid_m / v_max;
     return dt;
 }
 
 double calculate_output_interval(double e_k_keV, double L_device_m, int points_per_trajectory = 100) {
     const double e_k_J = e_k_keV * 1000.0 * 1.60218e-19;
-    const double v_proton = std::sqrt(2 * e_k_J / M_PROTON);
+    const double v_proton = std::sqrt(2 * e_k_J / M_ALPHA);
     const double T_transit = L_device_m / v_proton; // Time to traverse the device
     return T_transit / points_per_trajectory;
 }
@@ -592,7 +592,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     
     // Calculate initial proton velocity for verification
     const double e_k_initial_J = INITIAL_ALPHA_ENERGY_KEV * 1000.0 * 1.60218e-19;
-    const double v_initial = std::sqrt(2 * e_k_initial_J / M_PROTON);
+    const double v_initial = std::sqrt(2 * e_k_initial_J / M_ALPHA);
     const double T_transit = L_total_sim / v_initial; // Transit time through device
     
     // Print calculated parameters
@@ -726,7 +726,7 @@ int main(int argc, char* argv[]) { // Modified main signature
     
     // Calculate initial proton velocity from the global energy constant
     const double e_k_J = INITIAL_ALPHA_ENERGY_KEV * 1000.0 * 1.60218e-19; // Convert keV -> eV -> Joules
-    const double v_total = std::sqrt(2 * e_k_J / M_PROTON); // Initial velocity in m/s
+    const double v_total = std::sqrt(2 * e_k_J / M_ALPHA); // Initial velocity in m/s
     
     std::cout << "\n=== FINAL ALPHA EMISSION PARAMETERS ===" << std::endl;
     std::cout << "Initial X position: " << initial_x_position_m * 1e6 << " um" << std::endl;

@@ -30,17 +30,19 @@ if not trajectories:
 plt.figure(figsize=(8, 6))
 for pid in sorted(trajectories.keys()):
     pts = trajectories[pid]
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
+    xs = [p[0] * 1e6 for p in pts]
+    ys = [p[1] * 1e6 for p in pts]
     plt.plot(xs, ys, linewidth=1.0, label=f"proton {pid}")
 
-plt.xlabel("x [m]")
-plt.ylabel("y [m]")
+plt.xlabel("x [um]")
+plt.ylabel("y [um]")
 plt.title("Proton trajectories")
 plt.grid(True, linestyle="--", alpha=0.4)
 plt.axis("equal")
-if len(trajectories) <= 20:
-    plt.legend()
+#if len(trajectories) <= 20:
+ #   plt.legend()
 
 plt.tight_layout()
+#plt.savefig("proton_trajectories.png", dpi=800)
+
 plt.show()

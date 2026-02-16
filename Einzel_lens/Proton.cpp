@@ -99,58 +99,61 @@ int main(){
     std::cout << "Unique x count: " << grid_x.size() << " Unique y count: " << grid_y.size() << "\n";
     std::cout << "Grid x range: [" << grid_x.front() << ", " << grid_x.back() << "] m\n";
     std::cout << "Grid y range: [" << grid_y.front() << ", " << grid_y.back() << "] m\n";
-    std::cout << "Start x = -5e-6 m, start y in [-20e-6, 20e-6] m" << std::endl;
+    std::cout << "Start x = -100e-6 m, start y in [-300e-6, 300e-6] m" << std::endl;
 
     // Runge-Kutta 4 per protoni in campo elettrico
-    double dt = 1e-14; // Time step in seconds
-    double max_time = 1e-7; // Maximum simulation time in seconds
+    double dt = 1e-12; // Time step in seconds
+    double max_time = 2e-8; // Maximum simulation time in seconds
     double charge = 1.602e-19; // Charge of proton in Coulombs
     double initial_energy = 1000; // Initial energy in eV
     double mass = 1.672e-27; // Mass of proton in kg
-    int n_protons = 50; // Numero di protoni da simulare
+    int n_protons = 10; // Numero di protoni da simulare
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-10, 10); // Angolo uniforme tra -10 e 10 gradi
-    std::uniform_real_distribution<> dis_y(-40, 40.0); // y iniziale in micron
+    std::uniform_real_distribution<> dis(0, 0); // Angolo uniforme tra -2 e 2 gradi
+    std::uniform_real_distribution<> dis_y(-300., 300.0); // y iniziale in micron
     std::ofstream traj_file("proton_trajectories.csv");
     traj_file << "proton_id,time_s,pos_x_m,pos_y_m,vel_x_m_s,vel_y_m_s\n";
 
     for (int p = 0; p < n_protons; ++p) {
-        double pos_x = -9*1e-6; // Initial x position in meters
+        double pos_x = -265*1e-6; // Initial x position in meters
         double pos_y = dis_y(gen) * 1e-6;   // Initial y position in meters
         double vel_magnitude = std::sqrt((2 * initial_energy * 1.602e-19) / mass); // Initial velocity magnitude in m/s
-        double angle_deg = dis(gen);
-        double angle_rad = angle_deg * (M_PI / 180.0);
+        double angle_deg =0;// dis(gen);
+        double angle_rad = 0;   // * (M_PI / 180.0);
         double vel_x = vel_magnitude * std::cos(angle_rad);
         double vel_y = vel_magnitude * std::sin(angle_rad);
         double time = 0.0;
 
         while (time < max_time) {
-            // Se esce dal dominio della griglia, interrompi (evita campi extrapolati non affidabili)
-            if (pos_x < grid_x.front() || pos_x > grid_x.back() || pos_y < grid_y.front() || pos_y > grid_y.back()) {
-                std::cout << "Proton " << p << " left the simulation domain at time " << time << " s." << std::endl;
-                break;
+            double Ex = 0.0;
+            double Ey = 0.0;
+
+            // Se la posizione è fuori dalla griglia, il campo è zero (regione di drift)
+            // Altrimenti interpola il campo dalla griglia
+            if (pos_x >= grid_x.front() && pos_x <= grid_x.back() && 
+                pos_y >= grid_y.front() && pos_y <= grid_y.back()) {
+                
+                // Trova il punto di griglia più vicino in x e y
+                auto it_x = std::lower_bound(grid_x.begin(), grid_x.end(), pos_x);
+                auto it_y = std::lower_bound(grid_y.begin(), grid_y.end(), pos_y);
+
+                if (it_x != grid_x.end() && it_y != grid_y.end()) {
+                    size_t ix = static_cast<size_t>(std::distance(grid_x.begin(), it_x));
+                    size_t iy = static_cast<size_t>(std::distance(grid_y.begin(), it_y));
+                    // Clamp per sicurezza
+                    ix = std::min(ix, Nx - 1);
+                    iy = std::min(iy, Ny - 1);
+                    size_t index = iy * Nx + ix;
+
+                    Ex = Ex_grid[index];
+                    Ey = Ey_grid[index];
+                }
             }
-
-            // Trova il punto di griglia più vicino in x e y
-            auto it_x = std::lower_bound(grid_x.begin(), grid_x.end(), pos_x);
-            auto it_y = std::lower_bound(grid_y.begin(), grid_y.end(), pos_y);
-
-            if (it_x == grid_x.end() || it_y == grid_y.end()) {
-                std::cout << "Proton " << p << " left the simulation domain at time " << time << " s." << std::endl;
-                break;
-            }
-
-            size_t ix = static_cast<size_t>(std::distance(grid_x.begin(), it_x));
-            size_t iy = static_cast<size_t>(std::distance(grid_y.begin(), it_y));
-            // Clamp per sicurezza
-            ix = std::min(ix, Nx - 1);
-            iy = std::min(iy, Ny - 1);
-            size_t index = iy * Nx + ix;
-
-            double Ex = Ex_grid[index];
-            double Ey = Ey_grid[index];
+            
+            // Aggiungi spazio verso destra: continua la simulazione anche fuori dalla griglia
+            // La particella continuerà in drift se esce dal dominio del campo
 
             // Calculate acceleration
             double acc_x = (charge / mass) * Ex;
@@ -185,6 +188,8 @@ int main(){
 
             traj_file << p << "," << time << "," << pos_x << "," << pos_y << "," << vel_x << "," << vel_y << "\n";
         }
+        
+        std::cout << "Proton " << p << " simulation completed at time " << time << " s." << std::endl;
     }
 
     return 0;
